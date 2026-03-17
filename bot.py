@@ -89,8 +89,7 @@ async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     for i, art in enumerate(articles):
         caption = (
             f"*{art['title_ru']}*\n"
-            f"{art['summary']}\n\n"
-            f"📰 {art['source']} · {art.get('date', '')}"
+            f"{art['summary']}"
         )
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("Источник", url=art["url"])],

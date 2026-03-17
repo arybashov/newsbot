@@ -113,8 +113,9 @@ def enrich_with_ai(articles: list[dict]) -> list[dict]:
     ]
     prompt = (
         "For each article, write a Russian editorial headline (title_ru) "
-        "and a short 2-3 sentence Russian body summary (summary). "
-        "The summary must describe the article content and key facts, not repeat the headline. "
+        "and a concise but informative 3-5 sentence Russian body summary (summary). "
+        "The summary must describe the article content, key facts, named entities, and why the news matters. "
+        "Do not repeat the headline in the summary. "
         "Return ONLY a JSON object with key 'articles', no markdown.\n\n"
         f"Articles: {json.dumps(items, ensure_ascii=False)}\n\n"
         'Format: {"articles":[{"title":"...","title_ru":"...","summary":"...","url":"..."}]}'
