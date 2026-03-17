@@ -416,10 +416,10 @@ def enrich_with_ai(articles: list[dict]) -> list[dict]:
     return result
 
 
-def fetch_news(prompt: str) -> list[dict]:
+def fetch_news(prompt: str, force: bool = False) -> list[dict]:
     seen = load_seen()
     raw = fetch_rss(prompt)
-    new_articles = [a for a in raw if a["url"] not in seen]
+    new_articles = raw if force else [a for a in raw if a["url"] not in seen]
 
     if not new_articles:
         return []

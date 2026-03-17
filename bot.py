@@ -33,7 +33,7 @@ def format_pub_date(value: str) -> str:
     if not value:
         return ""
 
-    for fmt in ("%a, %d %b %Y %H:%M:%S %Z", "%a, %d %b %Y %H:%M:%S %z"):
+    for fmt in ("%a, %d %b %Y %H:%M:%S %Z", "%a, %d %b %Y %H:%M:%S %z", "%Y-%m-%d"):
         try:
             dt = datetime.strptime(value, fmt)
             return dt.strftime("%d.%b.%y")
@@ -49,6 +49,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "✈ *NewsBot — авиационное тренажёростроение*\n\n"
         "/scan — найти свежие новости\n"
+        "/rescan — пересканировать без учёта seen\n"
         "/prompt — показать текущий поисковый запрос\n"
         "/help — справка",
         parse_mode="Markdown",
@@ -60,10 +61,11 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(
         "*Команды бота:*\n\n"
-        "/scan — запустить поиск новостей\n"
+        "/scan — запустить поиск новых новостей\n"
+        "/rescan — пересканировать ленту, игнорируя `seen_urls`\n"
         "/prompt — показать поисковый запрос\n"
         "/start — главное меню\n\n"
-        "После /scan выберите нужные новости кнопками и нажмите «Создать черновик в WordPress».",
+        "После сканирования выберите нужные новости кнопками и нажмите «Создать черновик в WordPress».",
         parse_mode="Markdown",
     )
 
@@ -77,14 +79,15 @@ async def cmd_prompt(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+async def run_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE, force: bool):
     if not allowed(update):
         return
 
-    msg = await update.message.reply_text("🔍 Ищем новости, подождите...")
+    status_text = "🔄 Пересканируем новости, подождите..." if force else "🔍 Ищем новости, подождите..."
+    msg = await update.message.reply_text(status_text)
 
     try:
-        articles = fetch_news(SEARCH_PROMPT)
+        articles = fetch_news(SEARCH_PROMPT, force=force)
     except Exception as e:
         await msg.edit_text(f"❌ Ошибка поиска: {e}")
         return
@@ -108,10 +111,12 @@ async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"*{art['title_ru']}*\n"
             f"{art['summary']}"
         )
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Источник", url=art["url"])],
-            [InlineKeyboardButton("☐ Выбрать", callback_data=f"select:{i}")],
-        ])
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("Источник", url=art["url"])],
+                [InlineKeyboardButton("☐ Выбрать", callback_data=f"select:{i}")],
+            ]
+        )
         if art.get("image_url"):
             try:
                 await update.message.reply_photo(
@@ -132,6 +137,14 @@ async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Выберите новости выше и нажмите кнопку:", reply_markup=keyboard)
 
 
+async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await run_scan(update, ctx, force=False)
+
+
+async def cmd_rescan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await run_scan(update, ctx, force=True)
+
+
 async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -150,10 +163,12 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             label = "✓ Выбрано"
 
         ctx.bot_data["selected"] = selected
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Источник", url=articles[idx]["url"])],
-            [InlineKeyboardButton(label, callback_data=f"select:{idx}")],
-        ])
+        keyboard = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("Источник", url=articles[idx]["url"])],
+                [InlineKeyboardButton(label, callback_data=f"select:{idx}")],
+            ]
+        )
         await query.edit_message_reply_markup(reply_markup=keyboard)
 
     elif data == "draft":
@@ -192,6 +207,7 @@ def main():
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("prompt", cmd_prompt))
     app.add_handler(CommandHandler("scan", cmd_scan))
+    app.add_handler(CommandHandler("rescan", cmd_rescan))
     app.add_handler(CallbackQueryHandler(on_button))
     app.add_error_handler(on_error)
 
