@@ -61,35 +61,107 @@ def _extract_meta_image(url: str) -> str:
         return ""
 
     html = resp.text
-    patterns = [
-        r'<meta[^>]+property=["\']og:image(?::secure_url)?["\'][^>]+content=["\']([^"\']+)["\']',
-        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image(?::secure_url)?["\']',
-        r'<meta[^>]+name=["\']twitter:image(?::src)?["\'][^>]+content=["\']([^"\']+)["\']',
-        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image(?::src)?["\']',
-        r'<link[^>]+rel=["\']image_src["\'][^>]+href=["\']([^"\']+)["\']',
-        r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']image_src["\']',
+    candidates: list[tuple[int, str]] = []
+
+    meta_patterns = [
+        (120, r'<meta[^>]+property=["\']og:image(?::secure_url)?["\'][^>]+content=["\']([^"\']+)["\']'),
+        (120, r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image(?::secure_url)?["\']'),
+        (110, r'<meta[^>]+name=["\']twitter:image(?::src)?["\'][^>]+content=["\']([^"\']+)["\']'),
+        (110, r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image(?::src)?["\']'),
+        (100, r'<link[^>]+rel=["\']image_src["\'][^>]+href=["\']([^"\']+)["\']'),
+        (100, r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']image_src["\']'),
     ]
+    for base_score, pattern in meta_patterns:
+        for match in re.finditer(pattern, html, flags=re.IGNORECASE):
+            candidates.append((base_score, urljoin(url, unescape(match.group(1).strip()))))
 
-    for pattern in patterns:
-        match = re.search(pattern, html, flags=re.IGNORECASE)
-        if match:
-            return urljoin(url, unescape(match.group(1).strip()))
+    for match in re.finditer(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        html,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        try:
+            payload = json.loads(unescape(match.group(1).strip()))
+        except json.JSONDecodeError:
+            continue
+        for image_url in _extract_images_from_jsonld(payload):
+            candidates.append((95, urljoin(url, image_url)))
 
-    img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
-    if img_match:
-        return urljoin(url, unescape(img_match.group(1).strip()))
+    for match in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']([^>]*)>', html, flags=re.IGNORECASE):
+        image_url = urljoin(url, unescape(match.group(1).strip()))
+        attrs = match.group(2).lower()
+        score = 50
+        if "article" in attrs or "hero" in attrs or "main" in attrs:
+            score += 20
+        candidates.append((score, image_url))
 
-    return ""
+    return _choose_best_image(candidates)
+
+
+def _extract_images_from_jsonld(payload) -> list[str]:
+    urls: list[str] = []
+
+    def visit(node):
+        if isinstance(node, dict):
+            image = node.get("image")
+            if isinstance(image, str):
+                urls.append(image)
+            elif isinstance(image, list):
+                for item in image:
+                    if isinstance(item, str):
+                        urls.append(item)
+                    elif isinstance(item, dict) and isinstance(item.get("url"), str):
+                        urls.append(item["url"])
+            elif isinstance(image, dict) and isinstance(image.get("url"), str):
+                urls.append(image["url"])
+            for value in node.values():
+                visit(value)
+        elif isinstance(node, list):
+            for item in node:
+                visit(item)
+
+    visit(payload)
+    return urls
+
+
+def _choose_best_image(candidates: list[tuple[int, str]]) -> str:
+    best_url = ""
+    best_score = -10**9
+    seen: set[str] = set()
+
+    for base_score, image_url in candidates:
+        if not image_url or image_url in seen:
+            continue
+        seen.add(image_url)
+
+        normalized = image_url.lower()
+        score = base_score
+        if any(pattern in normalized for pattern in GENERIC_IMAGE_PATTERNS):
+            score -= 120
+        if any(word in normalized for word in ("logo", "icon", "sprite", "avatar", "placeholder", "brand")):
+            score -= 80
+        if any(word in normalized for word in ("hero", "lead", "article", "story", "cover", "photo", "image")):
+            score += 20
+        if any(ext in normalized for ext in (".jpg", ".jpeg", ".png", ".webp")):
+            score += 10
+        if "data:image" in normalized:
+            score -= 200
+
+        if score > best_score:
+            best_score = score
+            best_url = image_url
+
+    return best_url if best_score >= 0 else ""
 
 
 def _is_generic_image(image_url: str, source: str) -> bool:
     if not image_url:
         return True
 
-    if source in GENERIC_IMAGE_SOURCES:
+    normalized = image_url.lower()
+    if source in GENERIC_IMAGE_SOURCES and any(pattern in normalized for pattern in GENERIC_IMAGE_PATTERNS):
         return True
 
-    normalized = image_url.lower()
     return any(pattern in normalized for pattern in GENERIC_IMAGE_PATTERNS)
 
 
