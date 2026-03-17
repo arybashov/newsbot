@@ -18,6 +18,12 @@ GENERIC_IMAGE_SOURCES = {
     "Yahoo News",
     "Morningstar",
 }
+NO_IMAGE_DOMAINS = {
+    "yahoo.com",
+    "www.yahoo.com",
+    "morningstar.com",
+    "www.morningstar.com",
+}
 GENERIC_IMAGE_PATTERNS = (
     "s.yimg.com",
     "yahoo",
@@ -165,6 +171,11 @@ def _is_generic_image(image_url: str, source: str) -> bool:
     return any(pattern in normalized for pattern in GENERIC_IMAGE_PATTERNS)
 
 
+def _should_skip_images(article_url: str) -> bool:
+    domain = urlparse(article_url).netloc.lower()
+    return domain in NO_IMAGE_DOMAINS
+
+
 def _tokenize(text: str) -> set[str]:
     normalized = re.sub(r"[^a-z0-9]+", " ", (text or "").lower())
     return {token for token in normalized.split() if len(token) > 2 and token not in STOPWORDS}
@@ -224,14 +235,17 @@ def fetch_rss(query: str) -> list[dict]:
     for item in root.findall(".//item")[:20]:
         article_url = _extract_article_url(_child_text(item, "link"))
         rss_image_url = _child_text(item, "Image")
-        image_url = _extract_meta_image(article_url) or rss_image_url
-        if _is_generic_image(image_url, _child_text(item, "Source") or "Unknown"):
+        image_url = ""
+        source = _child_text(item, "Source") or "Unknown"
+        if not _should_skip_images(article_url):
+            image_url = _extract_meta_image(article_url) or rss_image_url
+        if _is_generic_image(image_url, source):
             image_url = ""
 
         articles.append({
             "title": _child_text(item, "title"),
             "url": article_url,
-            "source": _child_text(item, "Source") or "Unknown",
+            "source": source,
             "date": _child_text(item, "pubDate"),
             "description": _child_text(item, "description"),
             "image_url": image_url,
