@@ -118,8 +118,14 @@ async def run_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE, force: bool):
     msg = await update.message.reply_text(status_text)
 
     try:
-        result = await asyncio.to_thread(fetch_news_result, SEARCH_PROMPT, force)
+        result = await asyncio.wait_for(
+            asyncio.to_thread(fetch_news_result, SEARCH_PROMPT, force),
+            timeout=180,
+        )
         articles = result["articles"]
+    except asyncio.TimeoutError:
+        await msg.edit_text("Поиск занял слишком долго. Попробуйте позже.")
+        return
     except Exception as e:
         await msg.edit_text(f"Ошибка поиска: {e}")
         return

@@ -343,15 +343,17 @@ def _extract_article_payload(url: str) -> dict:
         return {}
 
     try:
-        downloaded = trafilatura.fetch_url(url)
-        if not downloaded:
-            # trafilatura couldn't fetch the page (bot-blocked, JS wall, etc.)
-            # Fall back to a plain requests.get for image extraction only.
-            log.debug("trafilatura failed for %s, trying requests fallback", url)
-            return {"image": _extract_meta_image(url)}
+        # Download with a hard timeout so one slow site can't stall the whole scan.
+        resp = requests.get(url, headers=REQUEST_HEADERS, timeout=12)
+        resp.raise_for_status()
+        html = resp.text
+    except requests.RequestException as exc:
+        log.debug("page fetch failed for %s: %s", url, exc)
+        return {}
 
+    try:
         extracted = trafilatura.extract(
-            downloaded,
+            html,
             url=url,
             output_format="json",
             with_metadata=True,
@@ -359,9 +361,6 @@ def _extract_article_payload(url: str) -> dict:
         )
         data = json.loads(extracted) if extracted else {}
 
-        # Use already-downloaded HTML for image extraction — no second HTTP request.
-        # Prefer our scoring-based extractor; fall back to trafilatura's own image field.
-        html = downloaded if isinstance(downloaded, str) else downloaded.decode("utf-8", errors="replace")
         meta_image = _extract_meta_image_from_html(html, url)
         trafilatura_image = (data.get("image") or "").strip()
         image = meta_image or trafilatura_image
@@ -373,7 +372,8 @@ def _extract_article_payload(url: str) -> dict:
             "date": (data.get("date") or "").strip(),
         }
     except Exception:
-        return {}
+        # trafilatura failed but we have HTML — still return the image at minimum.
+        return {"image": _extract_meta_image_from_html(html, url)}
 
 
 def _is_generic_image(image_url: str, source: str) -> bool:
@@ -517,14 +517,22 @@ def _bing_image_search(query: str) -> str:
     return ""
 
 
+_BING_IMAGE_SEARCH_LIMIT = 5
+
+
 def _fill_missing_images(articles: list[dict]) -> list[dict]:
-    """For articles still lacking an image, use Bing Image Search as last resort."""
+    """For articles still lacking an image, use Bing Image Search as last resort.
+    Limited to _BING_IMAGE_SEARCH_LIMIT requests per scan to avoid long delays."""
+    searches = 0
     for article in articles:
+        if searches >= _BING_IMAGE_SEARCH_LIMIT:
+            break
         if not article.get("image_url"):
             title = article.get("title", "").strip()
             if title:
                 log.debug("Bing image fallback for: %s", title[:60])
                 img = _bing_image_search(title)
+                searches += 1
                 if img:
                     article["image_url"] = img
     return articles
