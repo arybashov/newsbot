@@ -1,8 +1,8 @@
-import os
 import json
-import feedparser
+import os
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
+from xml.etree import ElementTree as ET
 
 import requests
 from groq import Groq
@@ -12,27 +12,20 @@ GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
 
-def resolve_article_url(url: str) -> str:
-    if not url:
-        return url
+def _child_text(item: ET.Element, name: str) -> str:
+    for child in item:
+        if child.tag == name or child.tag.endswith(f"}}{name}"):
+            return (child.text or "").strip()
+    return ""
 
-    parsed = urlparse(url)
-    if parsed.netloc != "news.google.com":
-        return url
 
-    try:
-        resp = requests.get(
-            url,
-            allow_redirects=True,
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=10,
-            stream=True,
-        )
-        resolved = resp.url
-        resp.close()
-        return resolved or url
-    except requests.RequestException:
-        return url
+def _extract_article_url(link: str) -> str:
+    if not link:
+        return link
+
+    parsed = urlparse(link)
+    url = parse_qs(parsed.query).get("url", [""])[0]
+    return unquote(url) or link
 
 
 def load_seen() -> set:
@@ -47,17 +40,19 @@ def save_seen(urls: set):
 
 def fetch_rss(query: str) -> list[dict]:
     encoded = query.replace(" ", "+")
-    url = f"https://news.google.com/rss/search?q={encoded}&hl=en&gl=US&ceid=US:en"
-    feed = feedparser.parse(url)
+    url = f"https://www.bing.com/news/search?q={encoded}&format=rss"
+    resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+    resp.raise_for_status()
+    root = ET.fromstring(resp.content)
 
     articles = []
-    for entry in feed.entries[:20]:
-        source_url = resolve_article_url(entry.get("link", ""))
+    for item in root.findall(".//item")[:20]:
         articles.append({
-            "title": entry.get("title", ""),
-            "url": source_url,
-            "source": entry.get("source", {}).get("title", "Unknown"),
-            "date": entry.get("published", ""),
+            "title": _child_text(item, "title"),
+            "url": _extract_article_url(_child_text(item, "link")),
+            "source": _child_text(item, "Source") or "Unknown",
+            "date": _child_text(item, "pubDate"),
+            "image_url": _child_text(item, "Image"),
         })
     return articles
 
@@ -93,7 +88,7 @@ def enrich_with_ai(articles: list[dict]) -> list[dict]:
             **base,
             "title_ru": item.get("title_ru", item.get("title", "")),
             "summary": item.get("summary", ""),
-            "image_url": "",
+            "image_url": base.get("image_url", ""),
         })
     return result
 

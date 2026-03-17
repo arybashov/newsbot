@@ -87,7 +87,7 @@ async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
     for i, art in enumerate(articles):
-        text = (
+        caption = (
             f"*{art['title_ru']}*\n"
             f"_{art['title']}_\n\n"
             f"{art['summary']}\n\n"
@@ -95,11 +95,19 @@ async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"{art['url']}"
         )
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("☐ Выбрать", callback_data=f"select:{i}")]])
-        await update.message.reply_text(
-            text,
-            parse_mode="Markdown",
-            reply_markup=keyboard,
-        )
+        if art.get("image_url"):
+            try:
+                await update.message.reply_photo(
+                    photo=art["image_url"],
+                    caption=caption,
+                    parse_mode="Markdown",
+                    reply_markup=keyboard,
+                )
+                continue
+            except Exception:
+                pass
+
+        await update.message.reply_text(caption, parse_mode="Markdown", reply_markup=keyboard)
 
     keyboard = InlineKeyboardMarkup(
         [[InlineKeyboardButton("Создать черновик в WordPress", callback_data="draft")]]
