@@ -16,6 +16,7 @@ from groq import Groq
 log = logging.getLogger(__name__)
 
 SEEN_FILE = Path(__file__).parent / "seen_urls.txt"
+PUBLISHED_FILE = Path(__file__).parent / "published_urls.txt"
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -546,6 +547,16 @@ def load_seen() -> set:
 
 def save_seen(urls: set):
     SEEN_FILE.write_text("\n".join(sorted(urls)))
+
+
+def load_published() -> set:
+    if PUBLISHED_FILE.exists():
+        return set(PUBLISHED_FILE.read_text().splitlines())
+    return set()
+
+
+def save_published(urls: set):
+    PUBLISHED_FILE.write_text("\n".join(sorted(urls)))
 
 
 def fetch_rss(query: str) -> list[dict]:
