@@ -420,9 +420,12 @@ def fetch_rss(query: str) -> list[dict]:
 def fetch_bing_rss(query: str) -> list[dict]:
     encoded = query.replace(" ", "+")
     url = f"https://www.bing.com/news/search?q={encoded}&format=rss"
-    resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
-    resp.raise_for_status()
-    root = ET.fromstring(resp.content)
+    try:
+        resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+    except (requests.RequestException, ET.ParseError):
+        return []
 
     articles = []
     for item in root.findall(".//item")[:20]:
@@ -451,7 +454,13 @@ def fetch_bing_rss(query: str) -> list[dict]:
 def fetch_google_rss(query: str) -> list[dict]:
     encoded = query.replace(" ", "+")
     url = f"https://news.google.com/rss/search?q={encoded}&hl=en&gl=US&ceid=US:en"
-    feed = feedparser.parse(url)
+    try:
+        resp = requests.get(url, headers=REQUEST_HEADERS, timeout=15)
+        resp.raise_for_status()
+    except requests.RequestException:
+        return []
+
+    feed = feedparser.parse(resp.content)
 
     articles = []
     for entry in feed.entries[:20]:

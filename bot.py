@@ -1,5 +1,6 @@
 import logging
 import os
+import asyncio
 from io import BytesIO
 from datetime import datetime
 
@@ -113,7 +114,7 @@ async def run_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE, force: bool):
     msg = await update.message.reply_text(status_text)
 
     try:
-        articles = fetch_news(SEARCH_PROMPT, force=force)
+        articles = await asyncio.to_thread(fetch_news, SEARCH_PROMPT, force=force)
     except Exception as e:
         await msg.edit_text(f"❌ Ошибка поиска: {e}")
         return
