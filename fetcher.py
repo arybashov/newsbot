@@ -79,8 +79,12 @@ def _extract_meta_image(url: str) -> str:
     meta_patterns = [
         (120, r'<meta[^>]+property=["\']og:image(?::secure_url)?["\'][^>]+content=["\']([^"\']+)["\']'),
         (120, r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image(?::secure_url)?["\']'),
+        (118, r'<meta[^>]+property=["\']og:video:image["\'][^>]+content=["\']([^"\']+)["\']'),
+        (118, r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:video:image["\']'),
         (110, r'<meta[^>]+name=["\']twitter:image(?::src)?["\'][^>]+content=["\']([^"\']+)["\']'),
         (110, r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image(?::src)?["\']'),
+        (108, r'<meta[^>]+name=["\']twitter:player:image["\'][^>]+content=["\']([^"\']+)["\']'),
+        (108, r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:player:image["\']'),
         (100, r'<link[^>]+rel=["\']image_src["\'][^>]+href=["\']([^"\']+)["\']'),
         (100, r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']image_src["\']'),
     ]
@@ -99,6 +103,15 @@ def _extract_meta_image(url: str) -> str:
             continue
         for image_url in _extract_images_from_jsonld(payload):
             candidates.append((95, urljoin(url, image_url)))
+
+    for match in re.finditer(r'"thumbnailUrl"\s*:\s*"([^"]+)"', html, flags=re.IGNORECASE):
+        candidates.append((105, urljoin(url, unescape(match.group(1).strip()))))
+
+    for match in re.finditer(r'<video[^>]+poster=["\']([^"\']+)["\']', html, flags=re.IGNORECASE):
+        candidates.append((100, urljoin(url, unescape(match.group(1).strip()))))
+
+    for match in re.finditer(r'<source[^>]+poster=["\']([^"\']+)["\']', html, flags=re.IGNORECASE):
+        candidates.append((95, urljoin(url, unescape(match.group(1).strip()))))
 
     for match in re.finditer(
         r'<(?:img|source)[^>]+(?:srcset|data-srcset)=["\']([^"\']+)["\']([^>]*)>',
