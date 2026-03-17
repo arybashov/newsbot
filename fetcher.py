@@ -6,6 +6,7 @@ from html import unescape
 from urllib.parse import parse_qs, unquote, urljoin, urlparse
 from xml.etree import ElementTree as ET
 
+import feedparser
 import requests
 import trafilatura
 from groq import Groq
@@ -56,6 +57,22 @@ def _extract_article_url(link: str) -> str:
     parsed = urlparse(link)
     url = parse_qs(parsed.query).get("url", [""])[0]
     return unquote(url) or link
+
+
+def _resolve_google_news_url(link: str) -> str:
+    if not link:
+        return link
+
+    try:
+        resp = requests.get(link, headers=REQUEST_HEADERS, timeout=15, allow_redirects=True)
+        resp.raise_for_status()
+        resolved = str(resp.url)
+        domain = urlparse(resolved).netloc.lower()
+        if domain in {"consent.google.com", "news.google.com"}:
+            return ""
+        return resolved
+    except requests.RequestException:
+        return ""
 
 
 def _extract_meta_image(url: str) -> str:
@@ -352,6 +369,11 @@ def save_seen(urls: set):
 
 
 def fetch_rss(query: str) -> list[dict]:
+    articles = fetch_bing_rss(query) + fetch_google_rss(query)
+    return _dedupe_articles(articles)
+
+
+def fetch_bing_rss(query: str) -> list[dict]:
     encoded = query.replace(" ", "+")
     url = f"https://www.bing.com/news/search?q={encoded}&format=rss"
     resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
@@ -379,7 +401,37 @@ def fetch_rss(query: str) -> list[dict]:
             "content": article_payload.get("text", ""),
             "image_url": image_url,
         })
-    return _dedupe_articles(articles)
+    return articles
+
+
+def fetch_google_rss(query: str) -> list[dict]:
+    encoded = query.replace(" ", "+")
+    url = f"https://news.google.com/rss/search?q={encoded}&hl=en&gl=US&ceid=US:en"
+    feed = feedparser.parse(url)
+
+    articles = []
+    for entry in feed.entries[:20]:
+        article_url = _resolve_google_news_url(entry.get("link", ""))
+        if not article_url:
+            continue
+        article_payload = _extract_article_payload(article_url)
+        source = entry.get("source", {}).get("title", "Unknown")
+        image_url = ""
+        if not _should_skip_images(article_url):
+            image_url = article_payload.get("image") or _extract_meta_image(article_url)
+        if _is_generic_image(image_url, source):
+            image_url = ""
+
+        articles.append({
+            "title": entry.get("title", ""),
+            "url": article_url,
+            "source": source,
+            "date": article_payload.get("date") or entry.get("published", ""),
+            "description": article_payload.get("excerpt") or "",
+            "content": article_payload.get("text", ""),
+            "image_url": image_url,
+        })
+    return articles
 
 
 def enrich_with_ai(articles: list[dict]) -> list[dict]:
