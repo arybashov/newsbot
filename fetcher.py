@@ -2,11 +2,37 @@ import os
 import json
 import feedparser
 from pathlib import Path
+from urllib.parse import urlparse
+
+import requests
 from groq import Groq
 
 SEEN_FILE = Path(__file__).parent / "seen_urls.txt"
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
+
+
+def resolve_article_url(url: str) -> str:
+    if not url:
+        return url
+
+    parsed = urlparse(url)
+    if parsed.netloc != "news.google.com":
+        return url
+
+    try:
+        resp = requests.get(
+            url,
+            allow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+            stream=True,
+        )
+        resolved = resp.url
+        resp.close()
+        return resolved or url
+    except requests.RequestException:
+        return url
 
 
 def load_seen() -> set:
@@ -26,9 +52,10 @@ def fetch_rss(query: str) -> list[dict]:
 
     articles = []
     for entry in feed.entries[:20]:
+        source_url = resolve_article_url(entry.get("link", ""))
         articles.append({
             "title": entry.get("title", ""),
-            "url": entry.get("link", ""),
+            "url": source_url,
             "source": entry.get("source", {}).get("title", "Unknown"),
             "date": entry.get("published", ""),
         })
