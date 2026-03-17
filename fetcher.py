@@ -1,6 +1,8 @@
 import json
+import logging
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 from html import unescape
 from urllib.parse import parse_qs, unquote, urljoin, urlparse
@@ -10,6 +12,8 @@ import feedparser
 import requests
 import trafilatura
 from groq import Groq
+
+log = logging.getLogger(__name__)
 
 SEEN_FILE = Path(__file__).parent / "seen_urls.txt"
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
@@ -76,6 +80,7 @@ def _resolve_google_news_url(link: str) -> str:
 
 
 def _extract_meta_image(url: str) -> str:
+    """Download page and extract best image. Used as last-resort fallback."""
     if not url:
         return ""
 
@@ -89,7 +94,14 @@ def _extract_meta_image(url: str) -> str:
     if "html" not in content_type:
         return ""
 
-    html = resp.text
+    return _extract_meta_image_from_html(resp.text, url)
+
+
+def _extract_meta_image_from_html(html: str, url: str) -> str:
+    """Extract best image from already-downloaded HTML — no extra HTTP request."""
+    if not html or not url:
+        return ""
+
     candidates: list[tuple[int, str]] = []
     domain = urlparse(url).netloc.lower()
 
@@ -284,6 +296,7 @@ def _extract_article_payload(url: str) -> dict:
         downloaded = trafilatura.fetch_url(url)
         if not downloaded:
             return {}
+
         extracted = trafilatura.extract(
             downloaded,
             url=url,
@@ -291,13 +304,19 @@ def _extract_article_payload(url: str) -> dict:
             with_metadata=True,
             include_images=True,
         )
-        if not extracted:
-            return {}
-        data = json.loads(extracted)
+        data = json.loads(extracted) if extracted else {}
+
+        # Use already-downloaded HTML for image extraction — no second HTTP request.
+        # Prefer our scoring-based extractor; fall back to trafilatura's own image field.
+        html = downloaded if isinstance(downloaded, str) else downloaded.decode("utf-8", errors="replace")
+        meta_image = _extract_meta_image_from_html(html, url)
+        trafilatura_image = (data.get("image") or "").strip()
+        image = meta_image or trafilatura_image
+
         return {
             "text": (data.get("text") or data.get("raw_text") or "").strip(),
             "excerpt": (data.get("excerpt") or "").strip(),
-            "image": (data.get("image") or "").strip(),
+            "image": image,
             "date": (data.get("date") or "").strip(),
         }
     except Exception:
@@ -325,11 +344,33 @@ def _tokenize(text: str) -> set[str]:
     return {token for token in normalized.split() if len(token) > 2 and token not in STOPWORDS}
 
 
+_DATE_FORMATS = (
+    "%a, %d %b %Y %H:%M:%S %Z",
+    "%a, %d %b %Y %H:%M:%S %z",
+    "%Y-%m-%dT%H:%M:%S%z",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%d",
+)
+
+
+def _normalize_date(value: str) -> str:
+    """Return YYYY-MM-DD from any supported date string, or '' on failure."""
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(value, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return ""
+
+
 def _is_same_story(left: dict, right: dict) -> bool:
     if left.get("url") == right.get("url"):
         return True
 
-    if left.get("date") != right.get("date"):
+    left_date = _normalize_date(left.get("date", ""))
+    right_date = _normalize_date(right.get("date", ""))
+    # Only gate on date when both are successfully parsed (same calendar day).
+    if left_date and right_date and left_date != right_date:
         return False
 
     left_title = _tokenize(left.get("title", ""))
@@ -413,8 +454,12 @@ def save_seen(urls: set):
 
 
 def fetch_rss(query: str) -> list[dict]:
-    articles = fetch_bing_rss(query) + fetch_google_rss(query)
-    return _dedupe_articles(articles)
+    bing = fetch_bing_rss(query)
+    google = fetch_google_rss(query)
+    log.info("RSS fetch: bing=%d google=%d", len(bing), len(google))
+    articles = _dedupe_articles(bing + google)
+    log.info("After dedup: %d articles", len(articles))
+    return articles
 
 
 def fetch_bing_rss(query: str) -> list[dict]:
@@ -424,7 +469,8 @@ def fetch_bing_rss(query: str) -> list[dict]:
         resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
         resp.raise_for_status()
         root = ET.fromstring(resp.content)
-    except (requests.RequestException, ET.ParseError):
+    except (requests.RequestException, ET.ParseError) as exc:
+        log.warning("Bing RSS fetch failed: %s", exc)
         return []
 
     articles = []
@@ -435,7 +481,9 @@ def fetch_bing_rss(query: str) -> list[dict]:
         image_url = ""
         source = _child_text(item, "Source") or "Unknown"
         if not _should_skip_images(article_url):
-            image_url = article_payload.get("image") or _extract_meta_image(article_url) or rss_image_url
+            # _extract_article_payload already ran _extract_meta_image_from_html internally;
+            # rss_image_url is the last fallback from the feed itself.
+            image_url = article_payload.get("image") or rss_image_url
         if _is_generic_image(image_url, source):
             image_url = ""
 
@@ -457,7 +505,8 @@ def fetch_google_rss(query: str) -> list[dict]:
     try:
         resp = requests.get(url, headers=REQUEST_HEADERS, timeout=15)
         resp.raise_for_status()
-    except requests.RequestException:
+    except requests.RequestException as exc:
+        log.warning("Google RSS fetch failed: %s", exc)
         return []
 
     feed = feedparser.parse(resp.content)
@@ -471,7 +520,8 @@ def fetch_google_rss(query: str) -> list[dict]:
         source = entry.get("source", {}).get("title", "Unknown")
         image_url = ""
         if not _should_skip_images(article_url):
-            image_url = article_payload.get("image") or _extract_meta_image(article_url)
+            # _extract_article_payload already ran _extract_meta_image_from_html internally.
+            image_url = article_payload.get("image")
         if _is_generic_image(image_url, source):
             image_url = ""
 
@@ -511,15 +561,21 @@ def enrich_with_ai(articles: list[dict]) -> list[dict]:
         'Format: {"articles":[{"title":"...","title_ru":"...","summary":"...","url":"..."}]}'
     )
 
-    resp = client.chat.completions.create(
-        model=GROQ_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-        response_format={"type": "json_object"},
-    )
-
-    parsed = json.loads(resp.choices[0].message.content.strip())
-    enriched = parsed.get("articles", []) if isinstance(parsed, dict) else []
+    try:
+        resp = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+        parsed = json.loads(resp.choices[0].message.content.strip())
+        enriched = parsed.get("articles", []) if isinstance(parsed, dict) else []
+    except Exception as exc:
+        log.warning("Groq enrichment failed (%s) — returning raw articles", exc)
+        return [
+            {**a, "title_ru": a.get("title", ""), "summary": a.get("description", "")}
+            for a in articles
+        ]
 
     url_map = {a["url"]: a for a in articles}
     result = []
@@ -532,10 +588,6 @@ def enrich_with_ai(articles: list[dict]) -> list[dict]:
             "image_url": base.get("image_url", ""),
         })
     return result
-
-
-def fetch_news(prompt: str, force: bool = False) -> list[dict]:
-    return fetch_news_result(prompt, force)["articles"]
 
 
 def fetch_news_result(prompt: str, force: bool = False) -> dict:

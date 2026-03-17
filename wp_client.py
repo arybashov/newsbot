@@ -37,7 +37,10 @@ def generate_draft_content(articles: list[dict]) -> dict:
         response_format={"type": "json_object"},
     )
 
-    return json.loads(resp.choices[0].message.content)
+    try:
+        return json.loads(resp.choices[0].message.content)
+    except (json.JSONDecodeError, KeyError, IndexError) as exc:
+        raise RuntimeError(f"Groq вернул невалидный ответ: {exc}") from exc
 
 
 def create_draft(articles: list[dict]) -> dict:
