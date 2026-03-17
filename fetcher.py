@@ -23,6 +23,11 @@ GENERIC_IMAGE_PATTERNS = (
     "yahoo",
     "morningstar",
 )
+STOPWORDS = {
+    "the", "and", "for", "with", "that", "this", "from", "into", "after", "over",
+    "more", "than", "will", "first", "new", "its", "their", "about", "amid", "announces",
+    "announce", "launches", "launch", "training", "pilot", "pilots", "aviation",
+}
 
 
 def _child_text(item: ET.Element, name: str) -> str:
@@ -88,6 +93,44 @@ def _is_generic_image(image_url: str, source: str) -> bool:
     return any(pattern in normalized for pattern in GENERIC_IMAGE_PATTERNS)
 
 
+def _tokenize(text: str) -> set[str]:
+    normalized = re.sub(r"[^a-z0-9]+", " ", (text or "").lower())
+    return {token for token in normalized.split() if len(token) > 2 and token not in STOPWORDS}
+
+
+def _is_same_story(left: dict, right: dict) -> bool:
+    if left.get("url") == right.get("url"):
+        return True
+
+    if left.get("date") != right.get("date"):
+        return False
+
+    left_title = _tokenize(left.get("title", ""))
+    right_title = _tokenize(right.get("title", ""))
+    title_overlap = len(left_title & right_title)
+    title_base = max(1, min(len(left_title), len(right_title)))
+
+    left_desc = _tokenize(left.get("description", ""))
+    right_desc = _tokenize(right.get("description", ""))
+    desc_overlap = len(left_desc & right_desc)
+    desc_base = max(1, min(len(left_desc), len(right_desc)))
+
+    same_image = bool(left.get("image_url")) and left.get("image_url") == right.get("image_url")
+    if same_image and (title_overlap / title_base >= 0.4 or desc_overlap / desc_base >= 0.35):
+        return True
+
+    return title_overlap / title_base >= 0.75 or desc_overlap / desc_base >= 0.75
+
+
+def _dedupe_articles(articles: list[dict]) -> list[dict]:
+    unique: list[dict] = []
+    for article in articles:
+        if any(_is_same_story(article, existing) for existing in unique):
+            continue
+        unique.append(article)
+    return unique
+
+
 def load_seen() -> set:
     if SEEN_FILE.exists():
         return set(SEEN_FILE.read_text().splitlines())
@@ -121,7 +164,7 @@ def fetch_rss(query: str) -> list[dict]:
             "description": _child_text(item, "description"),
             "image_url": image_url,
         })
-    return articles
+    return _dedupe_articles(articles)
 
 
 def enrich_with_ai(articles: list[dict]) -> list[dict]:
