@@ -17,20 +17,11 @@ GENERIC_IMAGE_SOURCES = {
     "Yahoo",
     "Yahoo News",
     "Morningstar",
-    "ThyBlackMan on MSN",
-    "MSN",
 }
-GENERIC_IMAGE_KEYWORDS = (
-    "logo",
-    "icon",
-    "branding",
-    "brand",
-    "default",
-    "placeholder",
-    "avatar",
+GENERIC_IMAGE_PATTERNS = (
+    "s.yimg.com",
     "yahoo",
     "morningstar",
-    "msn",
 )
 
 
@@ -94,7 +85,7 @@ def _is_generic_image(image_url: str, source: str) -> bool:
         return True
 
     normalized = image_url.lower()
-    return any(keyword in normalized for keyword in GENERIC_IMAGE_KEYWORDS)
+    return any(pattern in normalized for pattern in GENERIC_IMAGE_PATTERNS)
 
 
 def load_seen() -> set:
