@@ -295,7 +295,10 @@ def _extract_article_payload(url: str) -> dict:
     try:
         downloaded = trafilatura.fetch_url(url)
         if not downloaded:
-            return {}
+            # trafilatura couldn't fetch the page (bot-blocked, JS wall, etc.)
+            # Fall back to a plain requests.get for image extraction only.
+            log.debug("trafilatura failed for %s, trying requests fallback", url)
+            return {"image": _extract_meta_image(url)}
 
         extracted = trafilatura.extract(
             downloaded,
