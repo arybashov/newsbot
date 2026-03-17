@@ -13,6 +13,25 @@ SEEN_FILE = Path(__file__).parent / "seen_urls.txt"
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0"}
+GENERIC_IMAGE_SOURCES = {
+    "Yahoo",
+    "Yahoo News",
+    "Morningstar",
+    "ThyBlackMan on MSN",
+    "MSN",
+}
+GENERIC_IMAGE_KEYWORDS = (
+    "logo",
+    "icon",
+    "branding",
+    "brand",
+    "default",
+    "placeholder",
+    "avatar",
+    "yahoo",
+    "morningstar",
+    "msn",
+)
 
 
 def _child_text(item: ET.Element, name: str) -> str:
@@ -67,6 +86,17 @@ def _extract_meta_image(url: str) -> str:
     return ""
 
 
+def _is_generic_image(image_url: str, source: str) -> bool:
+    if not image_url:
+        return True
+
+    if source in GENERIC_IMAGE_SOURCES:
+        return True
+
+    normalized = image_url.lower()
+    return any(keyword in normalized for keyword in GENERIC_IMAGE_KEYWORDS)
+
+
 def load_seen() -> set:
     if SEEN_FILE.exists():
         return set(SEEN_FILE.read_text().splitlines())
@@ -88,13 +118,17 @@ def fetch_rss(query: str) -> list[dict]:
     for item in root.findall(".//item")[:20]:
         article_url = _extract_article_url(_child_text(item, "link"))
         rss_image_url = _child_text(item, "Image")
+        image_url = _extract_meta_image(article_url) or rss_image_url
+        if _is_generic_image(image_url, _child_text(item, "Source") or "Unknown"):
+            image_url = ""
+
         articles.append({
             "title": _child_text(item, "title"),
             "url": article_url,
             "source": _child_text(item, "Source") or "Unknown",
             "date": _child_text(item, "pubDate"),
             "description": _child_text(item, "description"),
-            "image_url": _extract_meta_image(article_url) or rss_image_url,
+            "image_url": image_url,
         })
     return articles
 
