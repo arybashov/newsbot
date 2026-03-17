@@ -1,7 +1,9 @@
 import json
 import os
+import re
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from html import unescape
+from urllib.parse import parse_qs, unquote, urljoin, urlparse
 from xml.etree import ElementTree as ET
 
 import requests
@@ -10,6 +12,7 @@ from groq import Groq
 SEEN_FILE = Path(__file__).parent / "seen_urls.txt"
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
+REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
 def _child_text(item: ET.Element, name: str) -> str:
@@ -26,6 +29,42 @@ def _extract_article_url(link: str) -> str:
     parsed = urlparse(link)
     url = parse_qs(parsed.query).get("url", [""])[0]
     return unquote(url) or link
+
+
+def _extract_meta_image(url: str) -> str:
+    if not url:
+        return ""
+
+    try:
+        resp = requests.get(url, headers=REQUEST_HEADERS, timeout=15)
+        resp.raise_for_status()
+    except requests.RequestException:
+        return ""
+
+    content_type = resp.headers.get("Content-Type", "")
+    if "html" not in content_type:
+        return ""
+
+    html = resp.text
+    patterns = [
+        r'<meta[^>]+property=["\']og:image(?::secure_url)?["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image(?::secure_url)?["\']',
+        r'<meta[^>]+name=["\']twitter:image(?::src)?["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image(?::src)?["\']',
+        r'<link[^>]+rel=["\']image_src["\'][^>]+href=["\']([^"\']+)["\']',
+        r'<link[^>]+href=["\']([^"\']+)["\'][^>]+rel=["\']image_src["\']',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, html, flags=re.IGNORECASE)
+        if match:
+            return urljoin(url, unescape(match.group(1).strip()))
+
+    img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
+    if img_match:
+        return urljoin(url, unescape(img_match.group(1).strip()))
+
+    return ""
 
 
 def load_seen() -> set:
@@ -47,12 +86,14 @@ def fetch_rss(query: str) -> list[dict]:
 
     articles = []
     for item in root.findall(".//item")[:20]:
+        article_url = _extract_article_url(_child_text(item, "link"))
+        rss_image_url = _child_text(item, "Image")
         articles.append({
             "title": _child_text(item, "title"),
-            "url": _extract_article_url(_child_text(item, "link")),
+            "url": article_url,
             "source": _child_text(item, "Source") or "Unknown",
             "date": _child_text(item, "pubDate"),
-            "image_url": _child_text(item, "Image"),
+            "image_url": _extract_meta_image(article_url) or rss_image_url,
         })
     return articles
 
