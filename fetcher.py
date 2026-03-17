@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, unquote, urljoin, urlparse
 from xml.etree import ElementTree as ET
 
 import requests
+import trafilatura
 from groq import Groq
 
 SEEN_FILE = Path(__file__).parent / "seen_urls.txt"
@@ -160,6 +161,34 @@ def _choose_best_image(candidates: list[tuple[int, str]]) -> str:
     return best_url if best_score >= 0 else ""
 
 
+def _extract_article_payload(url: str) -> dict:
+    if not url:
+        return {}
+
+    try:
+        downloaded = trafilatura.fetch_url(url)
+        if not downloaded:
+            return {}
+        extracted = trafilatura.extract(
+            downloaded,
+            url=url,
+            output_format="json",
+            with_metadata=True,
+            include_images=True,
+        )
+        if not extracted:
+            return {}
+        data = json.loads(extracted)
+        return {
+            "text": (data.get("text") or data.get("raw_text") or "").strip(),
+            "excerpt": (data.get("excerpt") or "").strip(),
+            "image": (data.get("image") or "").strip(),
+            "date": (data.get("date") or "").strip(),
+        }
+    except Exception:
+        return {}
+
+
 def _is_generic_image(image_url: str, source: str) -> bool:
     if not image_url:
         return True
@@ -235,10 +264,11 @@ def fetch_rss(query: str) -> list[dict]:
     for item in root.findall(".//item")[:20]:
         article_url = _extract_article_url(_child_text(item, "link"))
         rss_image_url = _child_text(item, "Image")
+        article_payload = _extract_article_payload(article_url)
         image_url = ""
         source = _child_text(item, "Source") or "Unknown"
         if not _should_skip_images(article_url):
-            image_url = _extract_meta_image(article_url) or rss_image_url
+            image_url = article_payload.get("image") or _extract_meta_image(article_url) or rss_image_url
         if _is_generic_image(image_url, source):
             image_url = ""
 
@@ -246,8 +276,9 @@ def fetch_rss(query: str) -> list[dict]:
             "title": _child_text(item, "title"),
             "url": article_url,
             "source": source,
-            "date": _child_text(item, "pubDate"),
-            "description": _child_text(item, "description"),
+            "date": article_payload.get("date") or _child_text(item, "pubDate"),
+            "description": article_payload.get("excerpt") or _child_text(item, "description"),
+            "content": article_payload.get("text", ""),
             "image_url": image_url,
         })
     return _dedupe_articles(articles)
@@ -261,6 +292,7 @@ def enrich_with_ai(articles: list[dict]) -> list[dict]:
         {
             "title": a["title"],
             "description": a.get("description", ""),
+            "content": a.get("content", "")[:3000],
             "url": a["url"],
         }
         for a in articles
@@ -268,6 +300,7 @@ def enrich_with_ai(articles: list[dict]) -> list[dict]:
     prompt = (
         "For each article, write a Russian editorial headline (title_ru) "
         "and a concise but informative 3-5 sentence Russian body summary (summary). "
+        "Use the article description and content when available. "
         "The summary must describe the article content, key facts, named entities, and why the news matters. "
         "Do not repeat the headline in the summary. "
         "Return ONLY a JSON object with key 'articles', no markdown.\n\n"
