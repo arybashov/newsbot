@@ -26,8 +26,13 @@ NO_IMAGE_DOMAINS = {
     "www.morningstar.com",
 }
 GENERIC_IMAGE_PATTERNS = (
-    "s.yimg.com",
-    "yahoo",
+    "yahoo_default_logo",
+    "/cv/apiv2/social/images/",
+    "/cv/apiv2/default/finance/",
+    "/rz/p/yahoo_",
+    "privacy-choice-control",
+    "/newsletter/",
+    "favicon",
     "morningstar",
 )
 STOPWORDS = {
