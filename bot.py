@@ -72,51 +72,46 @@ def download_image(url: str) -> BytesIO | None:
     return image
 
 
+MAIN_MENU_TEXT = "✈ *NewsBot — авиационное тренажёростроение*\n\nВыберите действие:"
+MAIN_MENU_KEYBOARD = InlineKeyboardMarkup([
+    [InlineKeyboardButton("🔍 Новые новости", callback_data="menu:scan")],
+    [InlineKeyboardButton("🔄 Пересканировать", callback_data="menu:rescan")],
+    [InlineKeyboardButton("🔎 Поисковый запрос", callback_data="menu:prompt")],
+])
+
+
+async def send_main_menu(update: Update):
+    await update.message.reply_text(
+        MAIN_MENU_TEXT,
+        parse_mode="Markdown",
+        reply_markup=MAIN_MENU_KEYBOARD,
+    )
+
+
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
-
-    await update.message.reply_text(
-        "✈ *NewsBot — авиационное тренажёростроение*\n\n"
-        "/scan — найти свежие новости\n"
-        "/rescan — пересканировать без учёта seen\n"
-        "/prompt — показать текущий поисковый запрос\n"
-        "/help — справка",
-        parse_mode="Markdown",
-    )
+    await send_main_menu(update)
 
 
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
-
-    await update.message.reply_text(
-        "*Команды бота:*\n\n"
-        "/scan — запустить поиск новых новостей\n"
-        "/rescan — пересканировать ленту, игнорируя `seen_urls`\n"
-        "/prompt — показать поисковый запрос\n"
-        "/start — главное меню\n\n"
-        "После сканирования выберите нужные новости кнопками и нажмите «Создать черновик в WordPress».",
-        parse_mode="Markdown",
-    )
+    await send_main_menu(update)
 
 
 async def cmd_prompt(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
-
     await update.message.reply_text(
         f"Текущий поисковый запрос:\n`{SEARCH_PROMPT}`",
         parse_mode="Markdown",
     )
 
 
-async def run_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE, force: bool):
-    if not allowed(update):
-        return
-
+async def run_scan(message, ctx: ContextTypes.DEFAULT_TYPE, force: bool):
     status_text = "Пересканируем новости, подождите..." if force else "Ищем новости, подождите..."
-    msg = await update.message.reply_text(status_text)
+    msg = await message.reply_text(status_text)
 
     try:
         result = await asyncio.wait_for(
@@ -173,7 +168,7 @@ async def run_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE, force: bool):
                 image_file = download_image(art["image_url"])
                 if image_file is None:
                     raise ValueError("Image download failed")
-                await update.message.reply_photo(
+                await message.reply_photo(
                     photo=InputFile(image_file),
                     caption=caption,
                     parse_mode="Markdown",
@@ -183,20 +178,20 @@ async def run_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE, force: bool):
             except Exception:
                 pass
 
-        await update.message.reply_text(caption, parse_mode="Markdown", reply_markup=keyboard)
+        await message.reply_text(caption, parse_mode="Markdown", reply_markup=keyboard)
 
     keyboard = InlineKeyboardMarkup(
         [[InlineKeyboardButton("Создать черновик в WordPress", callback_data="draft")]]
     )
-    await update.message.reply_text("Выберите новости выше и нажмите кнопку:", reply_markup=keyboard)
+    await message.reply_text("Выберите новости выше и нажмите кнопку:", reply_markup=keyboard)
 
 
 async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await run_scan(update, ctx, force=False)
+    await run_scan(update.message, ctx, force=False)
 
 
 async def cmd_rescan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await run_scan(update, ctx, force=True)
+    await run_scan(update.message, ctx, force=True)
 
 
 async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -206,6 +201,23 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = query.data
     articles = ctx.bot_data.get("articles", [])
     selected: set[int] = ctx.bot_data.get("selected", set())
+
+    if data.startswith("menu:"):
+        action = data.split(":")[1]
+        await query.answer()
+        if action == "scan":
+            await query.edit_message_reply_markup(reply_markup=None)
+            await run_scan(query.message, ctx, force=False)
+        elif action == "rescan":
+            await query.edit_message_reply_markup(reply_markup=None)
+            await run_scan(query.message, ctx, force=True)
+        elif action == "prompt":
+            await query.edit_message_text(
+                f"Текущий поисковый запрос:\n`{SEARCH_PROMPT}`\n\n{MAIN_MENU_TEXT}",
+                parse_mode="Markdown",
+                reply_markup=MAIN_MENU_KEYBOARD,
+            )
+        return
 
     if data.startswith("noop:"):
         await query.answer("Эта новость уже опубликована в канале.")
