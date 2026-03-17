@@ -1,9 +1,15 @@
-import os
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import Conflict
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+import os
+
 from dotenv import load_dotenv
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import Conflict
+from telegram.ext import (
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+)
 
 load_dotenv()
 
@@ -26,7 +32,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
     await update.message.reply_text(
-        "✈ *NewsBot — авиационное тренажоростроение*\n\n"
+        "✈ *NewsBot — авиационное тренажёростроение*\n\n"
         "/scan — найти свежие новости\n"
         "/prompt — показать текущий поисковый запрос\n"
         "/help — справка",
@@ -42,7 +48,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/scan — запустить поиск новостей\n"
         "/prompt — показать поисковый запрос\n"
         "/start — главное меню\n\n"
-        "После /scan выберите нужные новости кнопками и нажмите «→ В WordPress».",
+        "После /scan выберите нужные новости кнопками и нажмите «Создать черновик в WordPress».",
         parse_mode="Markdown",
     )
 
@@ -50,7 +56,10 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_prompt(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
-    await update.message.reply_text(f"🔍 Текущий поисковый запрос:\n`{SEARCH_PROMPT}`", parse_mode="Markdown")
+    await update.message.reply_text(
+        f"🔍 Текущий поисковый запрос:\n`{SEARCH_PROMPT}`",
+        parse_mode="Markdown",
+    )
 
 
 async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -82,17 +91,19 @@ async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             f"*{art['title_ru']}*\n"
             f"_{art['title']}_\n\n"
             f"{art['summary']}\n\n"
-            f"📰 {art['source']}  ·  {art.get('date', '')}"
+            f"📰 {art['source']} · {art.get('date', '')}\n\n"
+            f"{art['url']}"
         )
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("☐ Выбрать", callback_data=f"select:{i}")]])
         await update.message.reply_text(
             text,
             parse_mode="Markdown",
             reply_markup=keyboard,
-            disable_web_page_preview=True,
         )
 
-    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("→ Создать черновик в WordPress", callback_data="draft")]])
+    keyboard = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Создать черновик в WordPress", callback_data="draft")]]
+    )
     await update.message.reply_text("Выберите новости выше и нажмите кнопку:", reply_markup=keyboard)
 
 
