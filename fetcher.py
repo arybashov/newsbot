@@ -93,6 +93,7 @@ def fetch_rss(query: str) -> list[dict]:
             "url": article_url,
             "source": _child_text(item, "Source") or "Unknown",
             "date": _child_text(item, "pubDate"),
+            "description": _child_text(item, "description"),
             "image_url": _extract_meta_image(article_url) or rss_image_url,
         })
     return articles
@@ -102,10 +103,18 @@ def enrich_with_ai(articles: list[dict]) -> list[dict]:
     if not articles:
         return []
 
-    items = [{"title": a["title"], "url": a["url"]} for a in articles]
+    items = [
+        {
+            "title": a["title"],
+            "description": a.get("description", ""),
+            "url": a["url"],
+        }
+        for a in articles
+    ]
     prompt = (
-        "For each article, add a Russian editorial headline (title_ru) "
-        "and a 1-sentence Russian summary (summary). "
+        "For each article, write a Russian editorial headline (title_ru) "
+        "and a short 2-3 sentence Russian body summary (summary). "
+        "The summary must describe the article content and key facts, not repeat the headline. "
         "Return ONLY a JSON object with key 'articles', no markdown.\n\n"
         f"Articles: {json.dumps(items, ensure_ascii=False)}\n\n"
         'Format: {"articles":[{"title":"...","title_ru":"...","summary":"...","url":"..."}]}'
