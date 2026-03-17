@@ -2,10 +2,11 @@ import os
 import json
 import feedparser
 from pathlib import Path
-from openai import OpenAI
+from groq import Groq
 
 SEEN_FILE = Path(__file__).parent / "seen_urls.txt"
-client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
 
 def load_seen() -> set:
@@ -19,7 +20,6 @@ def save_seen(urls: set):
 
 
 def fetch_rss(query: str) -> list[dict]:
-    """Тянет Google News RSS по поисковому запросу."""
     encoded = query.replace(" ", "+")
     url = f"https://news.google.com/rss/search?q={encoded}&hl=en&gl=US&ceid=US:en"
     feed = feedparser.parse(url)
@@ -27,16 +27,15 @@ def fetch_rss(query: str) -> list[dict]:
     articles = []
     for entry in feed.entries[:20]:
         articles.append({
-            "title":  entry.get("title", ""),
-            "url":    entry.get("link", ""),
+            "title": entry.get("title", ""),
+            "url": entry.get("link", ""),
             "source": entry.get("source", {}).get("title", "Unknown"),
-            "date":   entry.get("published", ""),
+            "date": entry.get("published", ""),
         })
     return articles
 
 
 def enrich_with_ai(articles: list[dict]) -> list[dict]:
-    """Через GPT добавляет русский заголовок и саммари."""
     if not articles:
         return []
 
@@ -44,22 +43,20 @@ def enrich_with_ai(articles: list[dict]) -> list[dict]:
     prompt = (
         "For each article, add a Russian editorial headline (title_ru) "
         "and a 1-sentence Russian summary (summary). "
-        "Return ONLY a JSON array, no markdown.\n\n"
+        "Return ONLY a JSON object with key 'articles', no markdown.\n\n"
         f"Articles: {json.dumps(items, ensure_ascii=False)}\n\n"
-        'Format: [{"title":"...","title_ru":"...","summary":"...","url":"..."}]'
+        'Format: {"articles":[{"title":"...","title_ru":"...","summary":"...","url":"..."}]}'
     )
 
     resp = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=GROQ_MODEL,
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=2000,
+        temperature=0.2,
         response_format={"type": "json_object"},
     )
 
-    text = resp.choices[0].message.content.strip()
-    parsed = json.loads(text)
-    # GPT может вернуть {"articles": [...]} или просто [...]
-    enriched = parsed if isinstance(parsed, list) else next(iter(parsed.values()))
+    parsed = json.loads(resp.choices[0].message.content.strip())
+    enriched = parsed.get("articles", []) if isinstance(parsed, dict) else []
 
     url_map = {a["url"]: a for a in articles}
     result = []
@@ -67,20 +64,14 @@ def enrich_with_ai(articles: list[dict]) -> list[dict]:
         base = url_map.get(item.get("url", ""), {})
         result.append({
             **base,
-            "title_ru":  item.get("title_ru", item.get("title", "")),
-            "summary":   item.get("summary", ""),
+            "title_ru": item.get("title_ru", item.get("title", "")),
+            "summary": item.get("summary", ""),
             "image_url": "",
         })
     return result
 
 
 def fetch_news(prompt: str) -> list[dict]:
-    """
-    1. Тянет Google News RSS
-    2. Фильтрует уже виденные URL
-    3. Обогащает через GPT
-    4. Сохраняет новые URL в seen_urls.txt
-    """
     seen = load_seen()
     raw = fetch_rss(prompt)
     new_articles = [a for a in raw if a["url"] not in seen]

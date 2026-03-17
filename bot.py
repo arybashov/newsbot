@@ -1,29 +1,28 @@
 import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
-    ContextTypes
-)
+from telegram.error import Conflict
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fetcher import fetch_news
 from wp_client import create_draft
 
-logging.basicConfig(
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    level=logging.INFO
-)
+logging.basicConfig(format="%(asctime)s [%(levelname)s] %(message)s", level=logging.INFO)
 log = logging.getLogger(__name__)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 ALLOWED_CHAT_ID = int(os.environ["ALLOWED_CHAT_ID"])
-SEARCH_PROMPT   = os.environ.get("SEARCH_PROMPT", "flight simulator training aviation technology 2026")
+SEARCH_PROMPT = os.environ.get("SEARCH_PROMPT", "flight simulator training aviation technology 2026")
 
 
 def allowed(update: Update) -> bool:
     return update.effective_chat.id == ALLOWED_CHAT_ID
 
 
-# /start
-async def cmd_start(update: Update, ctx: ContextTypes):
+async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
     await update.message.reply_text(
@@ -31,12 +30,11 @@ async def cmd_start(update: Update, ctx: ContextTypes):
         "/scan — найти свежие новости\n"
         "/prompt — показать текущий поисковый запрос\n"
         "/help — справка",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
     )
 
 
-# /help
-async def cmd_help(update: Update, ctx: ContextTypes):
+async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
     await update.message.reply_text(
@@ -44,24 +42,18 @@ async def cmd_help(update: Update, ctx: ContextTypes):
         "/scan — запустить поиск новостей\n"
         "/prompt — показать поисковый запрос\n"
         "/start — главное меню\n\n"
-        "После /scan выберите нужные новости кнопками "
-        "и нажмите «→ В WordPress» для создания черновика.",
-        parse_mode="Markdown"
+        "После /scan выберите нужные новости кнопками и нажмите «→ В WordPress».",
+        parse_mode="Markdown",
     )
 
 
-# /prompt
-async def cmd_prompt(update: Update, ctx: ContextTypes):
+async def cmd_prompt(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
-    await update.message.reply_text(
-        f"🔍 Текущий поисковый запрос:\n`{SEARCH_PROMPT}`",
-        parse_mode="Markdown"
-    )
+    await update.message.reply_text(f"🔍 Текущий поисковый запрос:\n`{SEARCH_PROMPT}`", parse_mode="Markdown")
 
 
-# /scan
-async def cmd_scan(update: Update, ctx: ContextTypes):
+async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
 
@@ -77,17 +69,14 @@ async def cmd_scan(update: Update, ctx: ContextTypes):
         await msg.edit_text("Новостей не найдено. Попробуйте позже.")
         return
 
-    # Сохраняем статьи в контексте бота
     ctx.bot_data["articles"] = articles
     ctx.bot_data["selected"] = set()
 
     await msg.edit_text(
-        f"✅ Найдено материалов: *{len(articles)}*\n\n"
-        "Выберите нужные новости:",
-        parse_mode="Markdown"
+        f"✅ Найдено материалов: *{len(articles)}*\n\nВыберите нужные новости:",
+        parse_mode="Markdown",
     )
 
-    # Показываем каждую статью отдельным сообщением с кнопкой
     for i, art in enumerate(articles):
         text = (
             f"*{art['title_ru']}*\n"
@@ -95,25 +84,19 @@ async def cmd_scan(update: Update, ctx: ContextTypes):
             f"{art['summary']}\n\n"
             f"📰 {art['source']}  ·  {art.get('date', '')}"
         )
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("☐ Выбрать", callback_data=f"select:{i}")
-        ]])
-        await update.message.reply_text(text, parse_mode="Markdown",
-                                        reply_markup=keyboard,
-                                        disable_web_page_preview=True)
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("☐ Выбрать", callback_data=f"select:{i}")]])
+        await update.message.reply_text(
+            text,
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+            disable_web_page_preview=True,
+        )
 
-    # Кнопка отправки в конце
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("→ Создать черновик в WordPress", callback_data="draft")
-    ]])
-    await update.message.reply_text(
-        "Выберите новости выше и нажмите кнопку:",
-        reply_markup=keyboard
-    )
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("→ Создать черновик в WordPress", callback_data="draft")]])
+    await update.message.reply_text("Выберите новости выше и нажмите кнопку:", reply_markup=keyboard)
 
 
-# Обработка кнопок выбора
-async def on_button(update: Update, ctx: ContextTypes):
+async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
@@ -131,22 +114,16 @@ async def on_button(update: Update, ctx: ContextTypes):
             label = "✓ Выбрано"
 
         ctx.bot_data["selected"] = selected
-
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton(label, callback_data=f"select:{idx}")
-        ]])
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=f"select:{idx}")]])
         await query.edit_message_reply_markup(reply_markup=keyboard)
 
     elif data == "draft":
-        selected = ctx.bot_data.get("selected", set())
         if not selected:
             await query.edit_message_text("⚠️ Сначала выберите хотя бы одну новость.")
             return
 
         chosen = [articles[i] for i in sorted(selected)]
-        await query.edit_message_text(
-            f"⏳ Создаём черновик из {len(chosen)} материалов..."
-        )
+        await query.edit_message_text(f"⏳ Создаём черновик из {len(chosen)} материалов...")
 
         try:
             result = create_draft(chosen)
@@ -155,24 +132,32 @@ async def on_button(update: Update, ctx: ContextTypes):
                 f"📝 *{result['title']}*\n\n"
                 f"🔗 [Открыть в WordPress]({result['edit_url']})",
                 parse_mode="Markdown",
-                disable_web_page_preview=True
+                disable_web_page_preview=True,
             )
         except Exception as e:
             await query.edit_message_text(f"❌ Ошибка: {e}")
+
+
+async def on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE):
+    if isinstance(ctx.error, Conflict):
+        log.warning("Telegram 409 Conflict: убедитесь, что в Railway запущен один инстанс бота")
+        return
+    log.exception("Unhandled bot error", exc_info=ctx.error)
 
 
 def main():
     token = os.environ["TELEGRAM_TOKEN"]
     app = ApplicationBuilder().token(token).build()
 
-    app.add_handler(CommandHandler("start",  cmd_start))
-    app.add_handler(CommandHandler("help",   cmd_help))
+    app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("prompt", cmd_prompt))
-    app.add_handler(CommandHandler("scan",   cmd_scan))
+    app.add_handler(CommandHandler("scan", cmd_scan))
     app.add_handler(CallbackQueryHandler(on_button))
+    app.add_error_handler(on_error)
 
     log.info("Бот запущен")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
