@@ -90,10 +90,12 @@ async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         caption = (
             f"*{art['title_ru']}*\n"
             f"{art['summary']}\n\n"
-            f"📰 {art['source']} · {art.get('date', '')}\n\n"
-            f"{art['url']}"
+            f"📰 {art['source']} · {art.get('date', '')}"
         )
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("☐ Выбрать", callback_data=f"select:{i}")]])
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Источник", url=art["url"])],
+            [InlineKeyboardButton("☐ Выбрать", callback_data=f"select:{i}")],
+        ])
         if art.get("image_url"):
             try:
                 await update.message.reply_photo(
@@ -132,7 +134,10 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             label = "✓ Выбрано"
 
         ctx.bot_data["selected"] = selected
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=f"select:{idx}")]])
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("Источник", url=articles[idx]["url"])],
+            [InlineKeyboardButton(label, callback_data=f"select:{idx}")],
+        ])
         await query.edit_message_reply_markup(reply_markup=keyboard)
 
     elif data == "draft":
