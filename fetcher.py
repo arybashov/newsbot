@@ -517,7 +517,7 @@ def _bing_image_search(query: str) -> str:
     return ""
 
 
-_BING_IMAGE_SEARCH_LIMIT = 5
+_BING_IMAGE_SEARCH_LIMIT = 10
 
 
 def _fill_missing_images(articles: list[dict]) -> list[dict]:
