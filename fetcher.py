@@ -69,6 +69,7 @@ def _extract_meta_image(url: str) -> str:
 
     html = resp.text
     candidates: list[tuple[int, str]] = []
+    domain = urlparse(url).netloc.lower()
 
     meta_patterns = [
         (120, r'<meta[^>]+property=["\']og:image(?::secure_url)?["\'][^>]+content=["\']([^"\']+)["\']'),
@@ -94,6 +95,32 @@ def _extract_meta_image(url: str) -> str:
         for image_url in _extract_images_from_jsonld(payload):
             candidates.append((95, urljoin(url, image_url)))
 
+    for match in re.finditer(
+        r'<(?:img|source)[^>]+(?:srcset|data-srcset)=["\']([^"\']+)["\']([^>]*)>',
+        html,
+        flags=re.IGNORECASE,
+    ):
+        best_src = _pick_best_srcset(match.group(1))
+        if best_src:
+            attrs = match.group(2).lower()
+            score = 70
+            if any(word in attrs for word in ("article", "hero", "main", "lead", "gallery")):
+                score += 20
+            candidates.append((score, urljoin(url, best_src)))
+
+    lazy_patterns = [
+        r'<img[^>]+data-lazy-src=["\']([^"\']+)["\']([^>]*)>',
+        r'<img[^>]+data-src=["\']([^"\']+)["\']([^>]*)>',
+        r'<img[^>]+data-original=["\']([^"\']+)["\']([^>]*)>',
+    ]
+    for pattern in lazy_patterns:
+        for match in re.finditer(pattern, html, flags=re.IGNORECASE):
+            attrs = match.group(2).lower()
+            score = 75
+            if any(word in attrs for word in ("article", "hero", "main", "lead", "gallery")):
+                score += 20
+            candidates.append((score, urljoin(url, unescape(match.group(1).strip()))))
+
     for match in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']([^>]*)>', html, flags=re.IGNORECASE):
         image_url = urljoin(url, unescape(match.group(1).strip()))
         attrs = match.group(2).lower()
@@ -101,6 +128,8 @@ def _extract_meta_image(url: str) -> str:
         if "article" in attrs or "hero" in attrs or "main" in attrs:
             score += 20
         candidates.append((score, image_url))
+
+    candidates.extend(_extract_domain_specific_candidates(domain, url, html))
 
     return _choose_best_image(candidates)
 
@@ -129,6 +158,57 @@ def _extract_images_from_jsonld(payload) -> list[str]:
 
     visit(payload)
     return urls
+
+
+def _pick_best_srcset(srcset: str) -> str:
+    candidates: list[tuple[int, str]] = []
+    for part in srcset.split(","):
+        item = part.strip()
+        if not item:
+            continue
+        bits = item.split()
+        image_url = bits[0]
+        score = 0
+        if len(bits) > 1:
+            descriptor = bits[1].lower()
+            number = re.sub(r"[^0-9]", "", descriptor)
+            if number.isdigit():
+                score = int(number)
+        candidates.append((score, image_url))
+    if not candidates:
+        return ""
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
+def _extract_domain_specific_candidates(domain: str, base_url: str, html: str) -> list[tuple[int, str]]:
+    candidates: list[tuple[int, str]] = []
+
+    patterns_by_domain = {
+        "usatoday.com": [
+            (140, r'https://www\.gannett-cdn\.com/authoring/authoring-images/[^"\']+\.(?:jpg|jpeg|png|webp)(?:\?[^"\']*)?'),
+            (120, r'https://www\.gannett-cdn\.com/[^"\']+\.(?:jpg|jpeg|png|webp)(?:\?[^"\']*)?'),
+        ],
+        "www.usatoday.com": [
+            (140, r'https://www\.gannett-cdn\.com/authoring/authoring-images/[^"\']+\.(?:jpg|jpeg|png|webp)(?:\?[^"\']*)?'),
+            (120, r'https://www\.gannett-cdn\.com/[^"\']+\.(?:jpg|jpeg|png|webp)(?:\?[^"\']*)?'),
+        ],
+        "aviationweek.com": [
+            (130, r'https://aviationweek\.com/sites/default/files/[^"\']+\.(?:jpg|jpeg|png|webp)(?:\?[^"\']*)?'),
+        ],
+        "www.ainonline.com": [
+            (130, r'https://[^"\']*ainonline[^"\']+\.(?:jpg|jpeg|png|webp)(?:\?[^"\']*)?'),
+        ],
+        "www.flightglobal.com": [
+            (130, r'https://[^"\']*flightglobal[^"\']+\.(?:jpg|jpeg|png|webp)(?:\?[^"\']*)?'),
+        ],
+    }
+
+    for base_score, pattern in patterns_by_domain.get(domain, []):
+        for match in re.finditer(pattern, html, flags=re.IGNORECASE):
+            candidates.append((base_score, urljoin(base_url, match.group(0))))
+
+    return candidates
 
 
 def _choose_best_image(candidates: list[tuple[int, str]]) -> str:
