@@ -1,9 +1,11 @@
 import logging
 import os
+from io import BytesIO
 from datetime import datetime
 
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+import requests
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.error import Conflict
 from telegram.ext import (
     ApplicationBuilder,
@@ -23,6 +25,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 ALLOWED_CHAT_ID = int(os.environ["ALLOWED_CHAT_ID"])
 SEARCH_PROMPT = os.environ.get("SEARCH_PROMPT", "flight simulator training aviation technology 2026")
+REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
 def allowed(update: Update) -> bool:
@@ -41,6 +44,29 @@ def format_pub_date(value: str) -> str:
             continue
 
     return value
+
+
+def download_image(url: str) -> BytesIO | None:
+    if not url:
+        return None
+
+    try:
+        resp = requests.get(url, headers=REQUEST_HEADERS, timeout=20)
+        resp.raise_for_status()
+    except requests.RequestException:
+        return None
+
+    content_type = resp.headers.get("Content-Type", "").lower()
+    if not content_type.startswith("image/"):
+        return None
+
+    image = BytesIO(resp.content)
+    extension = content_type.split("/")[-1].split(";")[0] or "jpg"
+    if extension == "jpeg":
+        extension = "jpg"
+    image.name = f"article.{extension}"
+    image.seek(0)
+    return image
 
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -119,8 +145,11 @@ async def run_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE, force: bool):
         )
         if art.get("image_url"):
             try:
+                image_file = download_image(art["image_url"])
+                if image_file is None:
+                    raise ValueError("Image download failed")
                 await update.message.reply_photo(
-                    photo=art["image_url"],
+                    photo=InputFile(image_file),
                     caption=caption,
                     parse_mode="Markdown",
                     reply_markup=keyboard,
