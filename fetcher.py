@@ -54,6 +54,56 @@ def _child_text(item: ET.Element, name: str) -> str:
     return ""
 
 
+def _child_attr(item: ET.Element, name: str, attr: str) -> str:
+    """Return an attribute value from the first matching child element (handles namespaces)."""
+    for child in item:
+        if child.tag == name or child.tag.endswith(f"}}{name}"):
+            return (child.get(attr) or "").strip()
+    return ""
+
+
+def _rss_item_image(item: ET.Element) -> str:
+    """Extract image URL from Bing RSS item via media:content / media:thumbnail / enclosure."""
+    # media:content url="..."
+    url = _child_attr(item, "content", "url")
+    if url:
+        return url
+    # media:thumbnail url="..."
+    url = _child_attr(item, "thumbnail", "url")
+    if url:
+        return url
+    # <enclosure url="..." type="image/...">
+    for child in item:
+        tag = child.tag if "}" not in child.tag else child.tag.split("}")[1]
+        if tag == "enclosure":
+            mime = (child.get("type") or "").lower()
+            if mime.startswith("image/"):
+                return (child.get("url") or "").strip()
+    # Bing-specific <Image> text element
+    return _child_text(item, "Image")
+
+
+def _feedparser_image(entry: dict) -> str:
+    """Extract image URL from a feedparser entry (media:content / media:thumbnail / enclosures)."""
+    for mc in entry.get("media_content", []):
+        url = mc.get("url", "")
+        if not url:
+            continue
+        medium = mc.get("medium", "")
+        mime = mc.get("type", "")
+        if medium == "image" or mime.startswith("image/") or not medium:
+            return url
+    for mt in entry.get("media_thumbnail", []):
+        url = mt.get("url", "")
+        if url:
+            return url
+    for enc in entry.get("enclosures", []):
+        url = enc.get("url", "")
+        if url and enc.get("type", "").startswith("image/"):
+            return url
+    return ""
+
+
 def _extract_article_url(link: str) -> str:
     if not link:
         return link
@@ -479,13 +529,12 @@ def fetch_bing_rss(query: str) -> list[dict]:
     articles = []
     for item in root.findall(".//item")[:20]:
         article_url = _extract_article_url(_child_text(item, "link"))
-        rss_image_url = _child_text(item, "Image")
+        rss_image_url = _rss_item_image(item)
         article_payload = _extract_article_payload(article_url)
         image_url = ""
         source = _child_text(item, "Source") or "Unknown"
         if not _should_skip_images(article_url):
-            # _extract_article_payload already ran _extract_meta_image_from_html internally;
-            # rss_image_url is the last fallback from the feed itself.
+            # Priority: page scraping → RSS media tag → Bing <Image> fallback.
             image_url = article_payload.get("image") or rss_image_url
         if _is_generic_image(image_url, source):
             image_url = ""
@@ -519,12 +568,13 @@ def fetch_google_rss(query: str) -> list[dict]:
         article_url = _resolve_google_news_url(entry.get("link", ""))
         if not article_url:
             continue
+        rss_image_url = _feedparser_image(entry)
         article_payload = _extract_article_payload(article_url)
         source = entry.get("source", {}).get("title", "Unknown")
         image_url = ""
         if not _should_skip_images(article_url):
-            # _extract_article_payload already ran _extract_meta_image_from_html internally.
-            image_url = article_payload.get("image")
+            # Priority: page scraping → RSS media tag (media:content / thumbnail / enclosure).
+            image_url = article_payload.get("image") or rss_image_url
         if _is_generic_image(image_url, source):
             image_url = ""
 
