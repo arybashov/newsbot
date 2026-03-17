@@ -352,10 +352,54 @@ def _is_same_story(left: dict, right: dict) -> bool:
 def _dedupe_articles(articles: list[dict]) -> list[dict]:
     unique: list[dict] = []
     for article in articles:
-        if any(_is_same_story(article, existing) for existing in unique):
+        match_index = next(
+            (index for index, existing in enumerate(unique) if _is_same_story(article, existing)),
+            None,
+        )
+        if match_index is None:
+            unique.append(article)
             continue
-        unique.append(article)
+
+        existing = unique[match_index]
+        existing_score = _article_quality_score(existing)
+        article_score = _article_quality_score(article)
+        preferred = article if article_score > existing_score else existing
+        fallback = existing if preferred is article else article
+        unique[match_index] = _merge_article_versions(preferred, fallback)
     return unique
+
+
+def _article_quality_score(article: dict) -> int:
+    score = 0
+
+    if article.get("image_url"):
+        score += 100
+    score += min(len(article.get("content", "")) // 20, 80)
+    score += min(len(article.get("description", "")) // 20, 40)
+    score += min(len(article.get("title", "")) // 10, 20)
+
+    source = (article.get("source") or "").lower()
+    if "google news" in source:
+        score -= 20
+
+    return score
+
+
+def _merge_article_versions(preferred: dict, fallback: dict) -> dict:
+    merged = dict(preferred)
+
+    for key in ("title", "url", "source", "date", "description", "content", "image_url"):
+        if not merged.get(key) and fallback.get(key):
+            merged[key] = fallback[key]
+
+    if not merged.get("image_url") and fallback.get("image_url"):
+        merged["image_url"] = fallback["image_url"]
+    if len(merged.get("content", "")) < len(fallback.get("content", "")):
+        merged["content"] = fallback["content"]
+    if len(merged.get("description", "")) < len(fallback.get("description", "")):
+        merged["description"] = fallback["description"]
+
+    return merged
 
 
 def load_seen() -> set:
