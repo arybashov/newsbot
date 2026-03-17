@@ -1,5 +1,6 @@
 import logging
 import os
+from datetime import datetime
 
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -26,6 +27,20 @@ SEARCH_PROMPT = os.environ.get("SEARCH_PROMPT", "flight simulator training aviat
 
 def allowed(update: Update) -> bool:
     return update.effective_chat.id == ALLOWED_CHAT_ID
+
+
+def format_pub_date(value: str) -> str:
+    if not value:
+        return ""
+
+    for fmt in ("%a, %d %b %Y %H:%M:%S %Z", "%a, %d %b %Y %H:%M:%S %z"):
+        try:
+            dt = datetime.strptime(value, fmt)
+            return dt.strftime("%d.%b.%y")
+        except ValueError:
+            continue
+
+    return value
 
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -87,7 +102,9 @@ async def cmd_scan(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
     for i, art in enumerate(articles):
+        pub_date = format_pub_date(art.get("date", ""))
         caption = (
+            f"`{pub_date}`\n"
             f"*{art['title_ru']}*\n"
             f"{art['summary']}"
         )
