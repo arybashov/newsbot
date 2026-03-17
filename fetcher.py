@@ -496,6 +496,40 @@ def _merge_article_versions(preferred: dict, fallback: dict) -> dict:
     return merged
 
 
+def _bing_image_search(query: str) -> str:
+    """Search Bing Images and return the first usable image URL."""
+    encoded = requests.utils.quote(query)
+    url = f"https://www.bing.com/images/search?q={encoded}&count=5"
+    try:
+        resp = requests.get(url, headers=REQUEST_HEADERS, timeout=10)
+        resp.raise_for_status()
+    except requests.RequestException:
+        return ""
+
+    for m in re.finditer(r'class="iusc"[^>]+m="([^"]+)"', resp.text):
+        try:
+            data = json.loads(unescape(m.group(1)))
+            murl = data.get("murl", "")
+            if murl and murl.startswith("http"):
+                return murl
+        except (json.JSONDecodeError, KeyError):
+            continue
+    return ""
+
+
+def _fill_missing_images(articles: list[dict]) -> list[dict]:
+    """For articles still lacking an image, use Bing Image Search as last resort."""
+    for article in articles:
+        if not article.get("image_url"):
+            title = article.get("title", "").strip()
+            if title:
+                log.debug("Bing image fallback for: %s", title[:60])
+                img = _bing_image_search(title)
+                if img:
+                    article["image_url"] = img
+    return articles
+
+
 def load_seen() -> set:
     if SEEN_FILE.exists():
         return set(SEEN_FILE.read_text().splitlines())
@@ -653,6 +687,7 @@ def fetch_news_result(prompt: str, force: bool = False) -> dict:
     if not new_articles:
         return {"articles": [], "status": "seen", "raw_count": len(raw), "new_count": 0}
 
+    _fill_missing_images(new_articles)
     enriched = enrich_with_ai(new_articles)
 
     seen.update(a["url"] for a in new_articles)
