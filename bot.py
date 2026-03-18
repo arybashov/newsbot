@@ -6,13 +6,15 @@ from io import BytesIO
 
 import requests
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ReplyKeyboardMarkup, Update
 from telegram.error import Conflict
 from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 load_dotenv()
@@ -79,12 +81,21 @@ MAIN_MENU_KEYBOARD = InlineKeyboardMarkup([
     [InlineKeyboardButton("🔎 Поисковый запрос", callback_data="menu:prompt")],
 ])
 
+BTN_SCAN = "🔍 Новые новости"
+BTN_RESCAN = "🔄 Пересканировать"
+BTN_PROMPT = "🔎 Поисковый запрос"
+
+REPLY_KEYBOARD = ReplyKeyboardMarkup(
+    [[BTN_SCAN], [BTN_RESCAN], [BTN_PROMPT]],
+    resize_keyboard=True,
+)
+
 
 async def send_main_menu(update: Update):
     await update.message.reply_text(
         MAIN_MENU_TEXT,
         parse_mode="Markdown",
-        reply_markup=MAIN_MENU_KEYBOARD,
+        reply_markup=REPLY_KEYBOARD,
     )
 
 
@@ -107,6 +118,18 @@ async def cmd_prompt(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"Текущий поисковый запрос:\n`{SEARCH_PROMPT}`",
         parse_mode="Markdown",
     )
+
+
+async def on_reply_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if not allowed(update):
+        return
+    text = update.message.text
+    if text == BTN_SCAN:
+        await run_scan(update.message, ctx, force=False)
+    elif text == BTN_RESCAN:
+        await run_scan(update.message, ctx, force=True)
+    elif text == BTN_PROMPT:
+        await cmd_prompt(update, ctx)
 
 
 async def run_scan(message, ctx: ContextTypes.DEFAULT_TYPE, force: bool):
@@ -331,6 +354,7 @@ def main():
     app.add_handler(CommandHandler("scan", cmd_scan))
     app.add_handler(CommandHandler("rescan", cmd_rescan))
     app.add_handler(CallbackQueryHandler(on_button))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_reply_button))
     app.add_error_handler(on_error)
 
     log.info("Бот запущен")
