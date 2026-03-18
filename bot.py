@@ -76,12 +76,12 @@ def download_image(url: str) -> BytesIO | None:
 
 MAIN_MENU_TEXT = "✈ *NewsBot — авиационное тренажёростроение*\n\nВыберите действие:"
 MAIN_MENU_KEYBOARD = InlineKeyboardMarkup([
-    [InlineKeyboardButton("🔍 Новые новости", callback_data="menu:scan")],
+    [InlineKeyboardButton("🔍 Сканировать", callback_data="menu:scan")],
     [InlineKeyboardButton("🔄 Пересканировать", callback_data="menu:rescan")],
     [InlineKeyboardButton("🔎 Поисковый запрос", callback_data="menu:prompt")],
 ])
 
-BTN_SCAN = "🔍 Новые новости"
+BTN_SCAN = "🔍 Сканировать"
 BTN_RESCAN = "🔄 Пересканировать"
 BTN_PROMPT = "🔎 Поисковый запрос"
 
