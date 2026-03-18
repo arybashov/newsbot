@@ -131,13 +131,16 @@ async def on_reply_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
     if ctx.user_data.get("awaiting_prompt"):
+        if text not in (BTN_SCAN, BTN_RESCAN, BTN_PROMPT):
+            ctx.user_data["awaiting_prompt"] = False
+            ctx.bot_data["search_prompt"] = text
+            await update.message.reply_text(
+                f"Запрос обновлён:\n`{text}`",
+                parse_mode="Markdown",
+            )
+            return
+        # Кнопка меню — отменяем режим ввода и обрабатываем как обычно
         ctx.user_data["awaiting_prompt"] = False
-        ctx.bot_data["search_prompt"] = text
-        await update.message.reply_text(
-            f"Запрос обновлён:\n`{text}`",
-            parse_mode="Markdown",
-        )
-        return
 
     if text == BTN_SCAN:
         await run_scan(update.message, ctx, force=False)
@@ -173,7 +176,11 @@ async def run_scan(message, ctx: ContextTypes.DEFAULT_TYPE, force: bool):
             )
             return
 
-        await msg.edit_text("Новостей не найдено. Попробуйте позже.")
+        prompt = active_prompt(ctx)
+        await msg.edit_text(
+            f"Новостей не найдено.\n\nЗапрос: `{prompt}`",
+            parse_mode="Markdown",
+        )
         return
 
     ctx.bot_data["articles"] = articles
