@@ -111,11 +111,16 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await send_main_menu(update)
 
 
+def active_prompt(ctx: ContextTypes.DEFAULT_TYPE) -> str:
+    return ctx.bot_data.get("search_prompt", SEARCH_PROMPT)
+
+
 async def cmd_prompt(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
+    ctx.user_data["awaiting_prompt"] = True
     await update.message.reply_text(
-        f"Текущий поисковый запрос:\n`{SEARCH_PROMPT}`",
+        f"Текущий запрос:\n`{active_prompt(ctx)}`\n\nОтправьте новый запрос:",
         parse_mode="Markdown",
     )
 
@@ -124,6 +129,16 @@ async def on_reply_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not allowed(update):
         return
     text = update.message.text
+
+    if ctx.user_data.get("awaiting_prompt"):
+        ctx.user_data["awaiting_prompt"] = False
+        ctx.bot_data["search_prompt"] = text
+        await update.message.reply_text(
+            f"Запрос обновлён:\n`{text}`",
+            parse_mode="Markdown",
+        )
+        return
+
     if text == BTN_SCAN:
         await run_scan(update.message, ctx, force=False)
     elif text == BTN_RESCAN:
@@ -138,7 +153,7 @@ async def run_scan(message, ctx: ContextTypes.DEFAULT_TYPE, force: bool):
 
     try:
         result = await asyncio.wait_for(
-            asyncio.to_thread(fetch_news_result, SEARCH_PROMPT, force),
+            asyncio.to_thread(fetch_news_result, active_prompt(ctx), force),
             timeout=180,
         )
         articles = result["articles"]
@@ -235,10 +250,10 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_reply_markup(reply_markup=None)
             await run_scan(query.message, ctx, force=True)
         elif action == "prompt":
+            ctx.user_data["awaiting_prompt"] = True
             await query.edit_message_text(
-                f"Текущий поисковый запрос:\n`{SEARCH_PROMPT}`\n\n{MAIN_MENU_TEXT}",
+                f"Текущий запрос:\n`{active_prompt(ctx)}`\n\nОтправьте новый запрос в чат:",
                 parse_mode="Markdown",
-                reply_markup=MAIN_MENU_KEYBOARD,
             )
         return
 
