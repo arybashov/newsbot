@@ -19,6 +19,8 @@ SEEN_FILE = Path(__file__).parent / "seen_urls.txt"
 PUBLISHED_FILE = Path(__file__).parent / "published_urls.txt"
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
+UPSTASH_REDIS_URL = os.environ.get("UPSTASH_REDIS_URL", "")
+UPSTASH_REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_TOKEN", "")
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0"}
 GENERIC_IMAGE_SOURCES = {
@@ -540,23 +542,50 @@ def _fill_missing_images(articles: list[dict]) -> list[dict]:
     return articles
 
 
+def _redis():
+    """Return an Upstash Redis client if configured, else None."""
+    if not UPSTASH_REDIS_URL or not UPSTASH_REDIS_TOKEN:
+        return None
+    try:
+        from upstash_redis import Redis
+        return Redis(url=UPSTASH_REDIS_URL, token=UPSTASH_REDIS_TOKEN)
+    except ImportError:
+        return None
+
+
 def load_seen() -> set:
+    r = _redis()
+    if r is not None:
+        return set(r.smembers("seen_urls") or [])
     if SEEN_FILE.exists():
         return set(SEEN_FILE.read_text().splitlines())
     return set()
 
 
 def save_seen(urls: set):
+    r = _redis()
+    if r is not None:
+        if urls:
+            r.sadd("seen_urls", *urls)
+        return
     SEEN_FILE.write_text("\n".join(sorted(urls)))
 
 
 def load_published() -> set:
+    r = _redis()
+    if r is not None:
+        return set(r.smembers("published_urls") or [])
     if PUBLISHED_FILE.exists():
         return set(PUBLISHED_FILE.read_text().splitlines())
     return set()
 
 
 def save_published(urls: set):
+    r = _redis()
+    if r is not None:
+        if urls:
+            r.sadd("published_urls", *urls)
+        return
     PUBLISHED_FILE.write_text("\n".join(sorted(urls)))
 
 
