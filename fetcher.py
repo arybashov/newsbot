@@ -693,7 +693,7 @@ def enrich_with_ai(articles: list[dict]) -> list[dict]:
         {
             "title": a["title"],
             "description": a.get("description", ""),
-            "content": a.get("content", "")[:3000],
+            "content": a.get("content", "")[:500],
             "url": a["url"],
         }
         for a in articles
