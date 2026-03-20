@@ -698,26 +698,14 @@ def enrich_with_ai(articles: list[dict]) -> list[dict]:
 
 
 def _generate_queries(topic: str) -> list[str]:
-    """Ask Groq to expand a topic into 4 diverse English search queries."""
-    prompt_text = (
-        f'Generate 4 diverse English search queries to find recent news articles about: "{topic}"\n'
-        "Make them specific and varied so they return different articles.\n"
-        'Return ONLY JSON: {"queries": ["...", "...", "...", "..."]}'
-    )
-    try:
-        resp = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[{"role": "user", "content": prompt_text}],
-            temperature=0.4,
-            response_format={"type": "json_object"},
-        )
-        data = json.loads(resp.choices[0].message.content.strip())
-        queries = data.get("queries", [])
-        if isinstance(queries, list) and queries:
-            return [q for q in queries if isinstance(q, str)][:4]
-    except Exception as exc:
-        log.warning("Query generation failed: %s", exc)
-    return [topic]
+    """Expand a topic into several search query variations (no LLM call)."""
+    base = topic.strip()
+    return [
+        base,
+        f"{base} news",
+        f"{base} latest",
+        f"{base} industry",
+    ]
 
 
 def fetch_tavily(queries: list[str]) -> list[dict]:
