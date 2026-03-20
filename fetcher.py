@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 SEEN_FILE = Path(__file__).parent / "seen_urls.txt"
 PUBLISHED_FILE = Path(__file__).parent / "published_urls.txt"
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0"}
 GENERIC_IMAGE_SOURCES = {
@@ -696,9 +697,88 @@ def enrich_with_ai(articles: list[dict]) -> list[dict]:
     return result
 
 
+def _generate_queries(topic: str) -> list[str]:
+    """Ask Groq to expand a topic into 4 diverse English search queries."""
+    prompt_text = (
+        f'Generate 4 diverse English search queries to find recent news articles about: "{topic}"\n'
+        "Make them specific and varied so they return different articles.\n"
+        'Return ONLY JSON: {"queries": ["...", "...", "...", "..."]}'
+    )
+    try:
+        resp = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[{"role": "user", "content": prompt_text}],
+            temperature=0.4,
+            response_format={"type": "json_object"},
+        )
+        data = json.loads(resp.choices[0].message.content.strip())
+        queries = data.get("queries", [])
+        if isinstance(queries, list) and queries:
+            return [q for q in queries if isinstance(q, str)][:4]
+    except Exception as exc:
+        log.warning("Query generation failed: %s", exc)
+    return [topic]
+
+
+def fetch_tavily(queries: list[str]) -> list[dict]:
+    """Search news via Tavily API for a list of queries."""
+    if not TAVILY_API_KEY:
+        return []
+    try:
+        from tavily import TavilyClient
+    except ImportError:
+        log.warning("tavily-python not installed — skipping Tavily search")
+        return []
+
+    tavily = TavilyClient(api_key=TAVILY_API_KEY)
+    articles = []
+    for query in queries:
+        try:
+            resp = tavily.search(
+                query=query,
+                search_depth="basic",
+                topic="news",
+                max_results=5,
+                days=7,
+            )
+            for r in resp.get("results", []):
+                url = r.get("url", "")
+                if not url:
+                    continue
+                article_payload = _extract_article_payload(url)
+                image_url = article_payload.get("image", "")
+                source = urlparse(url).netloc.replace("www.", "")
+                if _is_generic_image(image_url, source):
+                    image_url = ""
+                articles.append({
+                    "title": r.get("title", ""),
+                    "url": url,
+                    "source": source,
+                    "date": r.get("published_date", "") or article_payload.get("date", ""),
+                    "description": article_payload.get("excerpt") or r.get("content", ""),
+                    "content": article_payload.get("text", "") or r.get("content", ""),
+                    "image_url": image_url,
+                })
+        except Exception as exc:
+            log.warning("Tavily search failed for query '%s': %s", query, exc)
+
+    log.info("Tavily fetch: %d articles from %d queries", len(articles), len(queries))
+    return articles
+
+
 def fetch_news_result(prompt: str, force: bool = False) -> dict:
     seen = load_seen()
-    raw = fetch_rss(prompt)
+    rss_articles = fetch_rss(prompt)
+
+    if TAVILY_API_KEY:
+        queries = _generate_queries(prompt)
+        log.info("Generated queries: %s", queries)
+        tavily_articles = fetch_tavily(queries)
+        raw = _dedupe_articles(rss_articles + tavily_articles)
+        log.info("Combined after dedup: %d articles (rss=%d tavily=%d)", len(raw), len(rss_articles), len(tavily_articles))
+    else:
+        raw = rss_articles
+
     new_articles = raw if force else [a for a in raw if a["url"] not in seen]
 
     if not raw:
