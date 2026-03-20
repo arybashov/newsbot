@@ -556,7 +556,10 @@ def _redis():
 def load_seen() -> set:
     r = _redis()
     if r is not None:
-        return set(r.smembers("seen_urls") or [])
+        try:
+            return set(r.smembers("seen_urls") or [])
+        except Exception as exc:
+            log.warning("Redis load_seen failed, using file: %s", exc)
     if SEEN_FILE.exists():
         return set(SEEN_FILE.read_text().splitlines())
     return set()
@@ -565,16 +568,22 @@ def load_seen() -> set:
 def save_seen(urls: set):
     r = _redis()
     if r is not None:
-        if urls:
-            r.sadd("seen_urls", *urls)
-        return
+        try:
+            if urls:
+                r.sadd("seen_urls", *urls)
+            return
+        except Exception as exc:
+            log.warning("Redis save_seen failed, using file: %s", exc)
     SEEN_FILE.write_text("\n".join(sorted(urls)))
 
 
 def load_published() -> set:
     r = _redis()
     if r is not None:
-        return set(r.smembers("published_urls") or [])
+        try:
+            return set(r.smembers("published_urls") or [])
+        except Exception as exc:
+            log.warning("Redis load_published failed, using file: %s", exc)
     if PUBLISHED_FILE.exists():
         return set(PUBLISHED_FILE.read_text().splitlines())
     return set()
@@ -583,9 +592,12 @@ def load_published() -> set:
 def save_published(urls: set):
     r = _redis()
     if r is not None:
-        if urls:
-            r.sadd("published_urls", *urls)
-        return
+        try:
+            if urls:
+                r.sadd("published_urls", *urls)
+            return
+        except Exception as exc:
+            log.warning("Redis save_published failed, using file: %s", exc)
     PUBLISHED_FILE.write_text("\n".join(sorted(urls)))
 
 
