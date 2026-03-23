@@ -19,12 +19,12 @@ st.markdown("""
 
 html, body, [class*="css"] { font-family: 'Lato', sans-serif; }
 
+/* ── Card ── */
 .tn-card {
     background: #fff;
     border-bottom: 1px solid #DDDDDD;
     padding-bottom: 18px;
     margin-bottom: 18px;
-    height: 100%;
 }
 .tn-card img {
     width: 100%;
@@ -77,6 +77,8 @@ html, body, [class*="css"] { font-family: 'Lato', sans-serif; }
     line-height: 1.6;
     margin: 0;
 }
+
+/* ── Page header ── */
 .tn-header {
     font-family: 'Oswald', sans-serif;
     font-size: 32px;
@@ -86,6 +88,57 @@ html, body, [class*="css"] { font-family: 'Lato', sans-serif; }
     border-bottom: 3px solid #DD0D82;
     padding-bottom: 8px;
     margin-bottom: 24px;
+}
+
+/* ── Article dialog ── */
+.tn-art-img {
+    width: 100%;
+    border-radius: 3px;
+    display: block;
+    margin-bottom: 16px;
+}
+.tn-art-badge {
+    display: inline-block;
+    background: #DD0D82;
+    color: #fff;
+    font-family: 'Oswald', sans-serif;
+    font-size: 12px;
+    font-weight: 300;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    padding: 4px 10px 3px 10px;
+    margin-bottom: 12px;
+}
+.tn-art-title {
+    font-family: 'Oswald', sans-serif;
+    font-size: 30px;
+    font-weight: 300;
+    color: #1c1c21;
+    line-height: 1.25;
+    margin: 0 0 10px 0;
+}
+.tn-art-meta {
+    font-family: 'Lato', sans-serif;
+    font-size: 13px;
+    color: #B4B4BA;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #DDDDDD;
+}
+.tn-art-summary {
+    font-family: 'Oswald', sans-serif;
+    font-size: 14px;
+    font-weight: 300;
+    color: #5B5B60;
+    line-height: 1.71;
+    letter-spacing: 0.02em;
+    margin-bottom: 16px;
+}
+.tn-art-body {
+    font-family: 'Lato', sans-serif;
+    font-size: 14px;
+    color: #5B5B60;
+    line-height: 1.71;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -119,7 +172,38 @@ if "selected" not in st.session_state:
     st.session_state.selected = set()
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Article dialog ────────────────────────────────────────────────────────────
+@st.dialog("", width="large")
+def show_article(art: dict):
+    title = art.get("title_ru") or art.get("title") or "Без заголовка"
+    source = art.get("source") or ""
+    date = art.get("date") or ""
+    meta = " · ".join(filter(None, [date, source]))
+    summary = art.get("summary") or art.get("description") or ""
+    content = art.get("content") or ""
+    image_url = art.get("image_url") or ""
+    url = art.get("url") or ""
+
+    if image_url:
+        st.markdown(f'<img class="tn-art-img" src="{image_url}" />', unsafe_allow_html=True)
+
+    html = f"""
+    <div class="tn-art-badge">{source or "News"}</div>
+    <div class="tn-art-title">{title.replace("<", "&lt;")}</div>
+    <div class="tn-art-meta">{meta}</div>
+    """
+    if summary:
+        html += f'<div class="tn-art-summary">{summary.replace("<", "&lt;")}</div>'
+    if content and content != summary:
+        html += f'<div class="tn-art-body">{content.replace("<", "&lt;")}</div>'
+    st.markdown(html, unsafe_allow_html=True)
+
+    if url:
+        st.markdown("---")
+        st.link_button("🔗 Читать оригинал", url)
+
+
+# ── Card HTML ─────────────────────────────────────────────────────────────────
 def card_html(art: dict) -> str:
     title = (art.get("title_ru") or art.get("title") or "Без заголовка").replace("<", "&lt;")
     excerpt = (art.get("summary") or art.get("description") or "").replace("<", "&lt;")
@@ -146,6 +230,7 @@ def card_html(art: dict) -> str:
     """
 
 
+# ── Publish to Telegram channel ───────────────────────────────────────────────
 def publish_to_channel(art: dict, published: set):
     CHANNEL_ID = os.environ.get("CHANNEL_ID", "")
     TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
@@ -180,7 +265,10 @@ def publish_to_channel(art: dict, published: set):
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown('<div style="font-family:Oswald,sans-serif;font-size:22px;font-weight:300;color:#29293A;">✈ Trenager News</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div style="font-family:Oswald,sans-serif;font-size:22px;font-weight:300;color:#29293A;">✈ Trenager News</div>',
+        unsafe_allow_html=True,
+    )
     st.caption("Авиационное тренажёростроение")
     st.divider()
 
@@ -244,7 +332,8 @@ if articles:
 
             btn_cols = st.columns(3)
             with btn_cols[0]:
-                st.link_button("🔗", url, use_container_width=True)
+                if st.button("📖", key=f"open_{i}", use_container_width=True, help="Читать статью"):
+                    show_article(art)
             with btn_cols[1]:
                 label = "✓" if is_selected else "☐"
                 if st.button(label, key=f"sel_{i}", use_container_width=True):
@@ -257,6 +346,6 @@ if articles:
                 if already_published:
                     st.button("✅", key=f"pub_{i}", disabled=True, use_container_width=True)
                 else:
-                    if st.button("📢", key=f"pub_{i}", use_container_width=True):
+                    if st.button("📢", key=f"pub_{i}", use_container_width=True, help="Опубликовать в канал"):
                         publish_to_channel(art, published)
                         st.rerun()
