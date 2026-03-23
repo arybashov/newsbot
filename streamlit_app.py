@@ -10,7 +10,85 @@ load_dotenv()
 from fetcher import fetch_news_result, load_published, save_published
 from wp_client import create_draft
 
-st.set_page_config(page_title="NewsBot", page_icon="✈", layout="wide")
+st.set_page_config(page_title="Trenager News Scanner", page_icon="✈", layout="wide")
+
+# ── Custom CSS ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@300;400&family=Lato:wght@400;700&display=swap');
+
+html, body, [class*="css"] { font-family: 'Lato', sans-serif; }
+
+.tn-card {
+    background: #fff;
+    border-bottom: 1px solid #DDDDDD;
+    padding-bottom: 18px;
+    margin-bottom: 18px;
+    height: 100%;
+}
+.tn-card img {
+    width: 100%;
+    aspect-ratio: 16/9;
+    object-fit: cover;
+    border-radius: 3px;
+    display: block;
+}
+.tn-card .no-img {
+    width: 100%;
+    aspect-ratio: 16/9;
+    background: #f0f0f0;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #B4B4BA;
+    font-size: 13px;
+}
+.tn-badge {
+    display: inline-block;
+    background: #DD0D82;
+    color: #fff;
+    font-family: 'Oswald', sans-serif;
+    font-size: 11px;
+    font-weight: 300;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 3px 8px 2px 8px;
+    margin: 10px 0 6px 0;
+}
+.tn-title {
+    font-family: 'Oswald', sans-serif;
+    font-size: 18px;
+    font-weight: 300;
+    color: #29293A;
+    line-height: 1.35;
+    margin: 0 0 6px 0;
+}
+.tn-meta {
+    font-family: 'Lato', sans-serif;
+    font-size: 12px;
+    color: #B4B4BA;
+    margin-bottom: 8px;
+}
+.tn-excerpt {
+    font-family: 'Lato', sans-serif;
+    font-size: 13px;
+    color: #5B5B60;
+    line-height: 1.6;
+    margin: 0;
+}
+.tn-header {
+    font-family: 'Oswald', sans-serif;
+    font-size: 32px;
+    font-weight: 300;
+    color: #29293A;
+    letter-spacing: 1px;
+    border-bottom: 3px solid #DD0D82;
+    padding-bottom: 8px;
+    margin-bottom: 24px;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
@@ -20,7 +98,7 @@ if APP_PASSWORD:
         st.session_state.authenticated = False
 
     if not st.session_state.authenticated:
-        st.title("✈ NewsBot")
+        st.markdown('<div class="tn-header">✈ Trenager News Scanner</div>', unsafe_allow_html=True)
         pwd = st.text_input("Пароль", type="password")
         if st.button("Войти"):
             if pwd == APP_PASSWORD:
@@ -31,9 +109,7 @@ if APP_PASSWORD:
         st.stop()
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-DEFAULT_PROMPT = os.environ.get(
-    "SEARCH_PROMPT", "flight simulator training aviation technology 2026"
-)
+DEFAULT_PROMPT = os.environ.get("SEARCH_PROMPT", "flight simulator training aviation technology 2026")
 
 if "search_prompt" not in st.session_state:
     st.session_state.search_prompt = DEFAULT_PROMPT
@@ -44,26 +120,49 @@ if "selected" not in st.session_state:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+def card_html(art: dict) -> str:
+    title = (art.get("title_ru") or art.get("title") or "Без заголовка").replace("<", "&lt;")
+    excerpt = (art.get("summary") or art.get("description") or "").replace("<", "&lt;")
+    if len(excerpt) > 180:
+        excerpt = excerpt[:180].rsplit(" ", 1)[0] + "…"
+    image_url = art.get("image_url", "")
+    source = (art.get("source") or "").replace("<", "&lt;")
+    date = art.get("date", "")
+    meta = " · ".join(filter(None, [date, source]))
+
+    img_block = (
+        f'<img src="{image_url}" />'
+        if image_url
+        else '<div class="no-img">Нет изображения</div>'
+    )
+    return f"""
+    <div class="tn-card">
+        {img_block}
+        <div class="tn-badge">{source or "News"}</div>
+        <div class="tn-title">{title}</div>
+        <div class="tn-meta">{meta}</div>
+        <div class="tn-excerpt">{excerpt}</div>
+    </div>
+    """
+
+
 def publish_to_channel(art: dict, published: set):
     CHANNEL_ID = os.environ.get("CHANNEL_ID", "")
     TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
     if not CHANNEL_ID or not TOKEN:
         st.error("CHANNEL_ID или TELEGRAM_TOKEN не заданы")
         return
-
     title = art.get("title_ru") or art.get("title") or "Без заголовка"
     caption = f"*{title}*\n\n{art['url']}"
     image_url = art.get("image_url", "")
-
     try:
         if image_url:
             img_resp = req.get(image_url, timeout=10)
             img_resp.raise_for_status()
-            files = {"photo": BytesIO(img_resp.content)}
             req.post(
                 f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
                 data={"chat_id": CHANNEL_ID, "caption": caption, "parse_mode": "Markdown"},
-                files=files,
+                files={"photo": BytesIO(img_resp.content)},
                 timeout=15,
             )
         else:
@@ -74,14 +173,14 @@ def publish_to_channel(art: dict, published: set):
             )
         published.add(art["url"])
         save_published(published)
-        st.success("Опубликовано в канал!")
+        st.success("Опубликовано!")
     except Exception as e:
-        st.error(f"Ошибка публикации: {e}")
+        st.error(f"Ошибка: {e}")
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.title("✈ NewsBot")
+    st.markdown('<div style="font-family:Oswald,sans-serif;font-size:22px;font-weight:300;color:#29293A;">✈ Trenager News</div>', unsafe_allow_html=True)
     st.caption("Авиационное тренажёростроение")
     st.divider()
 
@@ -97,24 +196,27 @@ with st.sidebar:
 
     if st.session_state.articles:
         st.divider()
-        if st.button("📝 Черновик WordPress", use_container_width=True):
+        selected_count = len(st.session_state.selected)
+        if st.button(
+            f"📝 Черновик WordPress{f' ({selected_count})' if selected_count else ''}",
+            use_container_width=True,
+            disabled=selected_count == 0,
+        ):
             chosen = [st.session_state.articles[i] for i in sorted(st.session_state.selected)]
-            if not chosen:
-                st.warning("Выберите хотя бы одну статью")
-            else:
-                with st.spinner("Создаём черновик..."):
-                    try:
-                        result = create_draft(chosen)
-                        st.success(f"Черновик создан: [{result['title']}]({result['edit_url']})")
-                    except Exception as e:
-                        st.error(f"Ошибка: {e}")
+            with st.spinner("Создаём черновик..."):
+                try:
+                    result = create_draft(chosen)
+                    st.success(f"[{result['title']}]({result['edit_url']})")
+                except Exception as e:
+                    st.error(f"Ошибка: {e}")
 
 # ── Scan ──────────────────────────────────────────────────────────────────────
+st.markdown('<div class="tn-header">Лента новостей</div>', unsafe_allow_html=True)
+
 if scan_clicked or rescan_clicked:
     force = rescan_clicked
     with st.spinner("Ищем новости..."):
         result = fetch_news_result(st.session_state.search_prompt, force=force)
-
     articles = result.get("articles", [])
     status = result.get("status")
 
@@ -125,61 +227,36 @@ if scan_clicked or rescan_clicked:
     else:
         st.session_state.articles = articles
         st.session_state.selected = set()
-        st.success(f"Найдено: {len(articles)} материалов")
 
-# ── Articles ──────────────────────────────────────────────────────────────────
+# ── Grid ──────────────────────────────────────────────────────────────────────
 articles = st.session_state.articles
 if articles:
     published = load_published()
+    cols = st.columns(3)
 
     for i, art in enumerate(articles):
-        title = art.get("title_ru") or art.get("title") or "Без заголовка"
-        summary = art.get("summary") or art.get("description") or ""
         url = art.get("url", "")
-        image_url = art.get("image_url", "")
-        date = art.get("date", "")
-        source = art.get("source", "")
         already_published = url in published
         is_selected = i in st.session_state.selected
 
-        with st.container(border=True):
-            cols = st.columns([1, 3])
+        with cols[i % 3]:
+            st.markdown(card_html(art), unsafe_allow_html=True)
 
-            with cols[0]:
-                if image_url:
-                    st.image(image_url, use_container_width=True)
-                else:
-                    st.caption("Нет изображения")
-
-            with cols[1]:
-                meta = " · ".join(filter(None, [date, source]))
-                if meta:
-                    st.caption(meta)
-                st.markdown(f"**{title}**")
-                if summary:
-                    st.write(summary)
-
-                btn_cols = st.columns(3)
-
-                with btn_cols[0]:
-                    st.link_button("🔗 Источник", url, use_container_width=True)
-
-                with btn_cols[1]:
-                    label = "✓ Выбрано" if is_selected else "☐ Выбрать"
-                    if st.button(label, key=f"sel_{i}", use_container_width=True):
-                        if is_selected:
-                            st.session_state.selected.discard(i)
-                        else:
-                            st.session_state.selected.add(i)
-                        st.rerun()
-
-                with btn_cols[2]:
-                    if already_published:
-                        st.button(
-                            "✅ Опубликовано", key=f"pub_{i}",
-                            disabled=True, use_container_width=True,
-                        )
+            btn_cols = st.columns(3)
+            with btn_cols[0]:
+                st.link_button("🔗", url, use_container_width=True)
+            with btn_cols[1]:
+                label = "✓" if is_selected else "☐"
+                if st.button(label, key=f"sel_{i}", use_container_width=True):
+                    if is_selected:
+                        st.session_state.selected.discard(i)
                     else:
-                        if st.button("📢 В канал", key=f"pub_{i}", use_container_width=True):
-                            publish_to_channel(art, published)
-                            st.rerun()
+                        st.session_state.selected.add(i)
+                    st.rerun()
+            with btn_cols[2]:
+                if already_published:
+                    st.button("✅", key=f"pub_{i}", disabled=True, use_container_width=True)
+                else:
+                    if st.button("📢", key=f"pub_{i}", use_container_width=True):
+                        publish_to_channel(art, published)
+                        st.rerun()
