@@ -173,7 +173,7 @@ if "selected" not in st.session_state:
 
 
 # ── Article dialog ────────────────────────────────────────────────────────────
-@st.dialog("", width="large")
+@st.dialog("Статья", width="large")
 def show_article(art: dict):
     title = art.get("title_ru") or art.get("title") or "Без заголовка"
     source = art.get("source") or ""
